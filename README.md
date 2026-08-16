@@ -8,7 +8,7 @@ A simple and modern Python application for viewing image information and EXIF me
 - 📷 Extract camera information from EXIF metadata
 - 📐 Show image resolution and dimensions
 - 💾 Display file size and image format
-- ⚙️ View ISO, aperture, shutter speed, and focal length
+- ⚙️ View ISO, aperture, shutter speed, white balance, flash, lens model, and focal length
 - 📅 Display the date the photo was taken
 - 🖥️ Modern minimal GUI built with CustomTkinter
 - ⌨️ Includes a terminal mode
@@ -32,4 +32,4 @@ image-metadata/
 
 - python gui.py
 
-## Version : 1.00
+## Version : 1.10
