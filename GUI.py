@@ -17,7 +17,7 @@ class App(ctk.CTk):
 
         # Appearance
         ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        ctk.set_default_color_theme("green")
 
         # Current image
         self.current_image = None
@@ -56,11 +56,12 @@ class App(ctk.CTk):
 
         self.title_label = ctk.CTkLabel(
             self.header,
-            text="Image Metadata",
+            text="📷  Image Metadata",
             font=ctk.CTkFont(
                 size=28,
                 weight="bold"
-            )
+            ),
+            text_color="#7CFFB2"
         )
 
         self.title_label.pack(
@@ -119,8 +120,8 @@ class App(ctk.CTk):
 
         self.preview_label = ctk.CTkLabel(
             self.preview_frame,
-            text="No Image Selected",
-            text_color="gray60",
+            text="🖼️\nNo Image Selected",
+            text_color="#7CFFB2",
             font=ctk.CTkFont(
                 size=20
             )
@@ -150,7 +151,7 @@ class App(ctk.CTk):
         # File information
         self.file_title = ctk.CTkLabel(
             self.info_frame,
-            text="File Information",
+            text="🗂️  File Information",
             font=ctk.CTkFont(
                 size=20,
                 weight="bold"
@@ -203,7 +204,7 @@ class App(ctk.CTk):
         # Camera information
         self.camera_title = ctk.CTkLabel(
             self.info_frame,
-            text="Camera Information",
+            text="📸  Camera Information",
             font=ctk.CTkFont(
                 size=20,
                 weight="bold"
@@ -224,6 +225,10 @@ class App(ctk.CTk):
             "Model: —"
         )
 
+        self.lens_model_label = self.create_info_label(
+            "Lens Model: —"
+        )
+
         self.iso_label = self.create_info_label(
             "ISO: —"
         )
@@ -242,6 +247,14 @@ class App(ctk.CTk):
 
         self.date_label = self.create_info_label(
             "Date Taken: —"
+        )
+
+        self.flash_label = self.create_info_label(
+            "Flash: —"
+        )
+
+        self.white_balance_label = self.create_info_label(
+            "White Balance: —"
         )
 
     # INFORMATION LABEL
@@ -280,9 +293,11 @@ class App(ctk.CTk):
 
         self.open_button = ctk.CTkButton(
             self.bottom_frame,
-            text="Open Image",
+            text="📂  Open Image",
             width=150,
             height=40,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
             font=ctk.CTkFont(
                 size=14,
                 weight="bold"
@@ -296,10 +311,13 @@ class App(ctk.CTk):
 
         self.exit_button = ctk.CTkButton(
             self.bottom_frame,
-            text="Exit",
+            text="✕  Exit",
             width=100,
             height=40,
             fg_color="transparent",
+            hover_color="#123f2c",
+            border_color="#2ECC71",
+            text_color="#7CFFB2",
             border_width=1,
             command=self.destroy
         )
@@ -405,6 +423,10 @@ class App(ctk.CTk):
             text=f"Model: {main.exif_value(data['model'])}"
         )
 
+        self.lens_model_label.configure(
+            text=f"Lens Model: {main.exif_value(data['lens_model'])}"
+        )
+
         self.iso_label.configure(
             text=f"ISO: {main.exif_value(data['iso'])}"
         )
@@ -426,6 +448,14 @@ class App(ctk.CTk):
 
         self.date_label.configure(
             text=f"Date Taken: {main.exif_value(data['date'])}"
+        )
+
+        self.flash_label.configure(
+            text=f"Flash: {main.exif_value(data['flash'])}"
+        )
+
+        self.white_balance_label.configure(
+            text=f"White Balance: {main.exif_value(data['white_balance'])}"
         )
 
     # -----------------------------------------
@@ -470,7 +500,7 @@ class App(ctk.CTk):
 if __name__ == "__main__":
 
     ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("blue")
+    ctk.set_default_color_theme("green")
 
     app = App()
     app.mainloop()

@@ -54,6 +54,7 @@ def load_image(loc):
 
     make = zeroth_ifd.get(piexif.ImageIFD.Make)
     model = zeroth_ifd.get(piexif.ImageIFD.Model)
+    lens_model = exif_ifd.get(piexif.ExifIFD.LensModel)
 
     # -----------------------------------------
     # CAMERA SETTINGS
@@ -63,6 +64,8 @@ def load_image(loc):
     fnum = exif_ifd.get(piexif.ExifIFD.FNumber)
     exposure_time = exif_ifd.get(piexif.ExifIFD.ExposureTime)
     iso = exif_ifd.get(piexif.ExifIFD.ISOSpeedRatings)
+    flash = exif_ifd.get(piexif.ExifIFD.Flash)
+    white_balance = exif_ifd.get(piexif.ExifIFD.WhiteBalance)
 
     # -----------------------------------------
     # DATE
@@ -81,6 +84,7 @@ def load_image(loc):
 
     make = decode_exif_value(make)
     model = decode_exif_value(model)
+    lens_model = decode_exif_value(lens_model)
     date = decode_exif_value(date)
 
     if fnum:
@@ -94,6 +98,12 @@ def load_image(loc):
 
     if iso:
         iso = decode_exif_value(iso)
+
+    if flash:
+        flash = decode_exif_value(flash)
+
+    if white_balance:
+        white_balance = decode_exif_value(white_balance)
 
     # -----------------------------------------
     # RETURN DATA
@@ -110,12 +120,15 @@ def load_image(loc):
         # Camera
         "make": make,
         "model": model,
+        "lens_model": lens_model,
 
         # Settings
         "focal": focal,
         "fnum": fnum,
         "exposure_time": exposure_time,
         "iso": iso,
+        "flash": flash,
+        "white_balance": white_balance,
 
         # Date
         "date": date,
@@ -149,9 +162,6 @@ def decode_exif_value(value):
 def rational_to_float(value):
     """
     Convert EXIF rational value to float.
-
-    Example:
-    (36, 10) -> 3.6
     """
 
     if isinstance(value, tuple) and len(value) == 2:
@@ -169,9 +179,6 @@ def rational_to_float(value):
 def rational_to_fraction(value):
     """
     Convert EXIF rational value to Fraction.
-
-    Example:
-    (1, 500) -> Fraction(1, 500)
     """
 
     if isinstance(value, tuple) and len(value) == 2:
@@ -223,11 +230,14 @@ def display_exif(data):
 
     print(f"Make          : {exif_value(data['make'])}")
     print(f"Model         : {exif_value(data['model'])}")
+    print(f"Lens Model    : {exif_value(data['lens_model'])}")
     print(f"ISO           : {exif_value(data['iso'])}")
     print(f"Aperture      : {exif_value(data['fnum'])}")
     print(f"Shutter Speed : {exif_value(data['exposure_time'])}")
     print(f"Focal Length  : {exif_value(data['focal'])}")
     print(f"Date Taken    : {exif_value(data['date'])}")
+    print(f"Flash         : {exif_value(data['flash'])}")
+    print(f"White Balance : {exif_value(data['white_balance'])}")
 
 
 # -----------------------------------------
