@@ -1,14 +1,19 @@
 import customtkinter as ctk
-from tkinter import filedialog
+from tkinter import filedialog, Canvas
+from tkinterdnd2 import TkinterDnD, DND_FILES
 from PIL import ImageTk
+from pathlib import Path
 
 import main
 
 
-class App(ctk.CTk):
+class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def __init__(self):
         super().__init__()
+
+        # Enable drag & drop support on this Tk instance
+        self.TkdndVersion = TkinterDnD._require(self)
 
         # Window
         self.title("Image Metadata")
@@ -21,7 +26,9 @@ class App(ctk.CTk):
 
         # Current image
         self.current_image = None
+        self.current_data = None
         self.image_tk = None
+        self.recent_map = {}
 
         # Main frame
         self.main_frame = ctk.CTkFrame(
@@ -39,6 +46,8 @@ class App(ctk.CTk):
         self.create_header()
         self.create_content()
         self.create_bottom_bar()
+
+        self.refresh_recent_menu()
 
     # HEADER
     def create_header(self):
@@ -118,20 +127,38 @@ class App(ctk.CTk):
             padx=(0, 10)
         )
 
+        # Histogram canvas (packed first so it stays at the bottom)
+        self.histogram_canvas = Canvas(
+            self.preview_frame,
+            height=110,
+            bg="#1a1a1a",
+            highlightthickness=0
+        )
+
+        self.histogram_canvas.pack(
+            side="bottom",
+            fill="x",
+            padx=12,
+            pady=12
+        )
+
         self.preview_label = ctk.CTkLabel(
             self.preview_frame,
-            text="🖼️\nNo Image Selected",
+            text="🖼️\nNo Image Selected\n(or drag & drop one here)",
             text_color="#7CFFB2",
             font=ctk.CTkFont(
                 size=20
             )
         )
 
-        self.preview_label.place(
-            relx=0.5,
-            rely=0.5,
-            anchor="center"
+        self.preview_label.pack(
+            fill="both",
+            expand=True
         )
+
+        # Drag & drop support
+        self.preview_frame.drop_target_register(DND_FILES)
+        self.preview_frame.dnd_bind("<<Drop>>", self.on_drop)
 
     # INFORMATION
     def create_information(self):
@@ -309,6 +336,36 @@ class App(ctk.CTk):
             side="left"
         )
 
+        self.copy_button = ctk.CTkButton(
+            self.bottom_frame,
+            text="📋  Copy Info",
+            width=140,
+            height=40,
+            fg_color="transparent",
+            hover_color="#123f2c",
+            border_color="#2ECC71",
+            text_color="#7CFFB2",
+            border_width=1,
+            command=self.copy_info_to_clipboard
+        )
+
+        self.copy_button.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.recent_menu = ctk.CTkOptionMenu(
+            self.bottom_frame,
+            values=["No recent files"],
+            command=self.open_recent,
+            width=220
+        )
+
+        self.recent_menu.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
         self.exit_button = ctk.CTkButton(
             self.bottom_frame,
             text="✕  Exit",
@@ -346,15 +403,52 @@ class App(ctk.CTk):
         if not file_path:
             return
 
+        self.load_and_display(file_path)
+
+    # DRAG & DROP
+    def on_drop(self, event):
+
+        # Dropped paths with spaces are wrapped in curly braces
+        file_path = event.data.strip("{}")
+
+        self.load_and_display(file_path)
+
+    # RECENT FILES
+    def refresh_recent_menu(self):
+
+        recent = main.load_recent_files()
+
+        self.recent_map = {
+            Path(p).name: p for p in recent
+        }
+
+        values = list(self.recent_map.keys()) or ["No recent files"]
+
+        self.recent_menu.configure(values=values)
+        self.recent_menu.set(values[0])
+
+    def open_recent(self, name):
+
+        file_path = self.recent_map.get(name)
+
+        if file_path:
+            self.load_and_display(file_path)
+
+    # LOAD + DISPLAY (shared by open/drop/recent)
+    def load_and_display(self, file_path):
+
         try:
 
             data = main.load_image(file_path)
 
             self.current_image = data["image"]
+            self.current_data = data
 
             self.update_preview()
-
             self.update_information(data)
+
+            main.add_recent_file(data["path"])
+            self.refresh_recent_menu()
 
         except FileNotFoundError:
 
@@ -364,6 +458,12 @@ class App(ctk.CTk):
 
             self.show_error(
                 "This file is not a valid image."
+            )
+
+        except OSError:
+
+            self.show_error(
+                "Could not open this file."
             )
 
     # -----------------------------------------
@@ -383,6 +483,53 @@ class App(ctk.CTk):
             image=self.image_tk,
             text=""
         )
+
+        self.update_histogram(self.current_image)
+
+    # -----------------------------------------
+    # HISTOGRAM
+    # -----------------------------------------
+
+    def update_histogram(self, image):
+
+        self.histogram_canvas.update_idletasks()
+
+        width = self.histogram_canvas.winfo_width()
+        height = self.histogram_canvas.winfo_height()
+
+        if width <= 1 or height <= 1:
+            width, height = 400, 110
+
+        self.histogram_canvas.delete("all")
+
+        histogram = main.get_histogram(image)
+
+        colors = {
+            "r": "#FF5C5C",
+            "g": "#5CFF9C",
+            "b": "#5CA8FF"
+        }
+
+        for channel, color in colors.items():
+
+            values = histogram[channel]
+            max_value = max(values) or 1
+
+            points = []
+
+            for i, value in enumerate(values):
+                x = i * (width / 256)
+                y = height - (value / max_value) * (height - 4)
+                points.append(x)
+                points.append(y)
+
+            if len(points) >= 4:
+                self.histogram_canvas.create_line(
+                    *points,
+                    fill=color,
+                    width=1,
+                    smooth=True
+                )
 
     # UPDATE INFORMATION
 
@@ -457,6 +604,40 @@ class App(ctk.CTk):
         self.white_balance_label.configure(
             text=f"White Balance: {main.exif_value(data['white_balance'])}"
         )
+
+    # -----------------------------------------
+    # COPY TO CLIPBOARD
+    # -----------------------------------------
+
+    def copy_info_to_clipboard(self):
+
+        if not self.current_data:
+            return
+
+        data = self.current_data
+
+        lines = [
+            f"Filename: {data['path'].name}",
+            f"Format: {data['format']}",
+            f"File Size: {data['file_size_mb']:.2f} MB",
+            f"Width: {data['size'][0]} PX",
+            f"Height: {data['size'][1]} PX",
+            f"Color Mode: {data['mode']}",
+            f"Make: {main.exif_value(data['make'])}",
+            f"Model: {main.exif_value(data['model'])}",
+            f"Lens Model: {main.exif_value(data['lens_model'])}",
+            f"ISO: {main.exif_value(data['iso'])}",
+            f"Aperture: {main.exif_value(data['fnum'])}",
+            f"Shutter Speed: {main.exif_value(data['exposure_time'])}",
+            f"Focal Length: {main.exif_value(data['focal'])}",
+            f"Date Taken: {main.exif_value(data['date'])}",
+            f"Flash: {main.exif_value(data['flash'])}",
+            f"White Balance: {main.exif_value(data['white_balance'])}",
+        ]
+
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(lines))
+        self.update()
 
     # -----------------------------------------
     # ERROR

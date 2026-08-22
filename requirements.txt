@@ -1,3 +1,4 @@
 Pillow
 piexif
 customtkinter
+tkinterdnd2
