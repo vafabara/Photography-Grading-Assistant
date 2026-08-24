@@ -30,6 +30,7 @@ The project is designed with a clean two-layer structure: **image processing and
 
   * Red, Green, and Blue channel histograms
   * Displayed directly below the image preview
+  * Customizable secondary color with **7 available color options**
 
 * 🖼️ Image preview
 
@@ -46,6 +47,16 @@ The project is designed with a clean two-layer structure: **image processing and
 * 📋 Copy Info
 
   * Copy image and EXIF metadata directly to the clipboard
+
+* 📤 Export Metadata
+
+  * Export image and EXIF information as **JSON**
+  * Export image and EXIF information as **CSV**
+
+* 🎨 GUI customization
+
+  * Choose from **7 secondary color options**
+  * Customize the application's visual appearance
 
 * 🖥️ Modern minimal dark-themed GUI
 
@@ -80,6 +91,7 @@ Contains the core application logic:
 * EXIF value conversion
 * RGB histogram generation
 * Recent file management
+* Metadata export functionality
 * Terminal mode
 
 ### `GUI.py`
@@ -92,6 +104,8 @@ Contains the graphical user interface:
 * Drag & Drop support
 * Recent files menu
 * Clipboard functionality
+* JSON and CSV export
+* Secondary color selection
 * GUI state management
 
 ## ▶️ Run the Application
@@ -127,11 +141,12 @@ main.py
    ├── Image Processing
    ├── EXIF Extraction
    ├── Histogram Generation
-   └── Recent File Management
+   ├── Recent File Management
+   └── Metadata Export
 ```
 
 The goal is to keep the project **simple, readable, and easy to extend** without introducing unnecessary architectural complexity.
 
 ## 📌 Version
 
-**v1.30**
+**v1.50**
