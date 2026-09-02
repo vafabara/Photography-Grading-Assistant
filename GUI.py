@@ -7,21 +7,6 @@ from pathlib import Path
 import main
 
 
-# -----------------------------------------
-# ACCENT COLOR PALETTE
-# -----------------------------------------
-
-COLOR_PALETTE = {
-    "Green":  {"text": "#7CFFB2", "fg": "#1F8F4C", "hover": "#27AE60", "border": "#2ECC71"},
-    "Blue":   {"text": "#7CC7FF", "fg": "#1F6F9F", "hover": "#278FCE", "border": "#2E9FE6"},
-    "Purple": {"text": "#C79CFF", "fg": "#6C3F9F", "hover": "#8850C7", "border": "#9B5CE6"},
-    "Red":    {"text": "#FF9C9C", "fg": "#9F3F3F", "hover": "#C75050", "border": "#E65C5C"},
-    "Orange": {"text": "#FFC27C", "fg": "#9F6A1F", "hover": "#C7862A", "border": "#E69633"},
-    "Pink":   {"text": "#FF9CD6", "fg": "#9F3F80", "hover": "#C750A0", "border": "#E65CB4"},
-    "Teal":   {"text": "#7CFFE9", "fg": "#1F9F8C", "hover": "#27C7AC", "border": "#2EE6C2"},
-}
-
-
 class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def __init__(self):
@@ -44,7 +29,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.current_data = None
         self.image_tk = None
         self.recent_map = {}
-        self.accent_color = "Green"
+
+        # Student workflow state
+        self.student_count = 0
+        self.students = []
+        self.current_student_index = 0
 
         # Main frame
         self.main_frame = ctk.CTkFrame(
@@ -59,12 +48,374 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             pady=20
         )
 
+        # Start with the setup workflow instead of the viewer
+        self.show_setup_count_screen()
+
+    # -----------------------------------------
+    # HELPERS
+    # -----------------------------------------
+
+    def clear_main_frame(self):
+
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+
+    # -----------------------------------------
+    # SETUP STEP 1: STUDENT COUNT
+    # -----------------------------------------
+
+    def show_setup_count_screen(self):
+
+        self.clear_main_frame()
+
+        frame = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="transparent"
+        )
+
+        frame.pack(expand=True)
+
+        title_label = ctk.CTkLabel(
+            frame,
+            text="📷  Image Metadata — Class Review Setup",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="#7CFFB2"
+        )
+
+        title_label.pack(pady=(0, 25))
+
+        question_label = ctk.CTkLabel(
+            frame,
+            text="How many students?",
+            font=ctk.CTkFont(size=16)
+        )
+
+        question_label.pack(pady=(0, 10))
+
+        count_entry = ctk.CTkEntry(
+            frame,
+            width=200,
+            justify="center"
+        )
+
+        count_entry.pack(pady=(0, 10))
+
+        error_label = ctk.CTkLabel(
+            frame,
+            text="",
+            text_color="#FF6B6B"
+        )
+
+        error_label.pack(pady=(0, 10))
+
+        def on_continue():
+
+            value = count_entry.get().strip()
+
+            if not value.isdigit() or int(value) <= 0:
+                error_label.configure(
+                    text="Please enter a positive whole number."
+                )
+                return
+
+            self.student_count = int(value)
+            self.show_setup_names_screen()
+
+        continue_button = ctk.CTkButton(
+            frame,
+            text="Continue",
+            width=150,
+            height=40,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
+            command=on_continue
+        )
+
+        continue_button.pack()
+
+    # -----------------------------------------
+    # SETUP STEP 2: STUDENT NAMES
+    # -----------------------------------------
+
+    def show_setup_names_screen(self):
+
+        self.clear_main_frame()
+
+        container = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="transparent"
+        )
+
+        container.pack(fill="both", expand=True, padx=40, pady=30)
+
+        title_label = ctk.CTkLabel(
+            container,
+            text="Enter Student Names",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color="#7CFFB2"
+        )
+
+        title_label.pack(pady=(0, 15))
+
+        scroll_frame = ctk.CTkScrollableFrame(
+            container,
+            fg_color="transparent"
+        )
+
+        scroll_frame.pack(fill="both", expand=True)
+
+        name_entries = []
+
+        for i in range(self.student_count):
+
+            row = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            row.pack(fill="x", pady=5)
+
+            row_label = ctk.CTkLabel(
+                row,
+                text=f"Student {i + 1} name:",
+                width=140,
+                anchor="w"
+            )
+
+            row_label.pack(side="left", padx=(0, 10))
+
+            entry = ctk.CTkEntry(row, width=250)
+            entry.pack(side="left")
+
+            name_entries.append(entry)
+
+        error_label = ctk.CTkLabel(
+            container,
+            text="",
+            text_color="#FF6B6B"
+        )
+
+        error_label.pack(pady=(10, 5))
+
+        def on_continue():
+
+            names = [entry.get().strip() for entry in name_entries]
+
+            if any(not name for name in names):
+                error_label.configure(
+                    text="Please fill in a name for every student."
+                )
+                return
+
+            self.students = [
+                {"name": name, "image_path": None} for name in names
+            ]
+
+            self.show_setup_photos_screen()
+
+        continue_button = ctk.CTkButton(
+            container,
+            text="Continue",
+            width=150,
+            height=40,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
+            command=on_continue
+        )
+
+        continue_button.pack(pady=(10, 0))
+
+    # -----------------------------------------
+    # SETUP STEP 3: ASSIGN PHOTOS
+    # -----------------------------------------
+
+    def show_setup_photos_screen(self):
+
+        self.clear_main_frame()
+
+        container = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="transparent"
+        )
+
+        container.pack(fill="both", expand=True, padx=40, pady=30)
+
+        title_label = ctk.CTkLabel(
+            container,
+            text="Assign a Photo to Each Student",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color="#7CFFB2"
+        )
+
+        title_label.pack(pady=(0, 15))
+
+        scroll_frame = ctk.CTkScrollableFrame(
+            container,
+            fg_color="transparent"
+        )
+
+        scroll_frame.pack(fill="both", expand=True)
+
+        self.photo_status_labels = []
+
+        error_label = ctk.CTkLabel(
+            container,
+            text="",
+            text_color="#FF6B6B"
+        )
+
+        def select_photo(index):
+
+            file_path = filedialog.askopenfilename(
+                title="Select an image",
+                filetypes=[
+                    (
+                        "Image files",
+                        "*.jpg *.jpeg *.png *.webp *.bmp *.tiff"
+                    ),
+                    (
+                        "All files",
+                        "*.*"
+                    )
+                ]
+            )
+
+            if not file_path:
+                return
+
+            self.students[index]["image_path"] = file_path
+
+            self.photo_status_labels[index].configure(
+                text="✅ Image selected",
+                text_color="#7CFFB2"
+            )
+
+        for i, student in enumerate(self.students):
+
+            row = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            row.pack(fill="x", pady=8)
+
+            name_label = ctk.CTkLabel(
+                row,
+                text=f"Student: {student['name']}",
+                width=220,
+                anchor="w",
+                font=ctk.CTkFont(size=14, weight="bold")
+            )
+
+            name_label.pack(side="left", padx=(0, 10))
+
+            select_button = ctk.CTkButton(
+                row,
+                text="Select Photo",
+                width=130,
+                command=lambda i=i: select_photo(i)
+            )
+
+            select_button.pack(side="left", padx=(0, 10))
+
+            status_label = ctk.CTkLabel(
+                row,
+                text="No image selected",
+                text_color="gray60"
+            )
+
+            status_label.pack(side="left")
+
+            self.photo_status_labels.append(status_label)
+
+        error_label.pack(pady=(10, 5))
+
+        def on_start_review():
+
+            if any(s["image_path"] is None for s in self.students):
+                error_label.configure(
+                    text="Please select an image for every student before starting."
+                )
+                return
+
+            self.start_review()
+
+        start_button = ctk.CTkButton(
+            container,
+            text="Start Review",
+            width=180,
+            height=40,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
+            command=on_start_review
+        )
+
+        start_button.pack(pady=(10, 0))
+
+    # -----------------------------------------
+    # REVIEW WORKFLOW
+    # -----------------------------------------
+
+    def start_review(self):
+
+        self.current_student_index = 0
+
+        self.clear_main_frame()
+
+        self.create_student_bar()
         self.create_header()
         self.create_content()
         self.create_bottom_bar()
 
         self.refresh_recent_menu()
-        self.apply_accent_color(self.accent_color)
+
+        self.load_current_student()
+
+    def create_student_bar(self):
+
+        self.student_frame = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="transparent"
+        )
+
+        self.student_frame.pack(
+            fill="x",
+            padx=25,
+            pady=(20, 0)
+        )
+
+        self.student_label = ctk.CTkLabel(
+            self.student_frame,
+            text="Student: —",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="#7CFFB2"
+        )
+
+        self.student_label.pack(side="left")
+
+    def load_current_student(self):
+
+        student = self.students[self.current_student_index]
+
+        self.student_label.configure(
+            text=f"Student: {student['name']}"
+        )
+
+        self.load_and_display(student["image_path"])
+
+    def next_student(self):
+
+        self.current_student_index += 1
+
+        if self.current_student_index >= len(self.students):
+            self.show_done_screen()
+        else:
+            self.load_current_student()
+
+    def show_done_screen(self):
+
+        self.clear_main_frame()
+
+        done_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Done",
+            font=ctk.CTkFont(size=32, weight="bold"),
+            text_color="#7CFFB2"
+        )
+
+        done_label.pack(expand=True)
 
     # HEADER
     def create_header(self):
@@ -77,7 +428,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.header.pack(
             fill="x",
             padx=25,
-            pady=(20, 10)
+            pady=(10, 10)
         )
 
         self.title_label = ctk.CTkLabel(
@@ -106,24 +457,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.subtitle_label.pack(
             side="left",
             padx=15
-        )
-
-        self.settings_button = ctk.CTkButton(
-            self.header,
-            text="⚙",
-            width=40,
-            height=40,
-            fg_color="transparent",
-            hover_color="#123f2c",
-            border_width=1,
-            font=ctk.CTkFont(
-                size=16
-            ),
-            command=self.open_settings
-        )
-
-        self.settings_button.pack(
-            side="right"
         )
 
     # CONTENT
@@ -389,24 +722,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             padx=(10, 0)
         )
 
-        self.export_button = ctk.CTkButton(
-            self.bottom_frame,
-            text="📤  Export",
-            width=140,
-            height=40,
-            fg_color="transparent",
-            hover_color="#123f2c",
-            border_color="#2ECC71",
-            text_color="#7CFFB2",
-            border_width=1,
-            command=self.export_info
-        )
-
-        self.export_button.pack(
-            side="left",
-            padx=(10, 0)
-        )
-
         self.recent_menu = ctk.CTkOptionMenu(
             self.bottom_frame,
             values=["No recent files"],
@@ -415,6 +730,25 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
         self.recent_menu.pack(
+            side="left",
+            padx=(10, 0)
+        )
+
+        self.next_button = ctk.CTkButton(
+            self.bottom_frame,
+            text="➡️  Next",
+            width=120,
+            height=40,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
+            font=ctk.CTkFont(
+                size=14,
+                weight="bold"
+            ),
+            command=self.next_student
+        )
+
+        self.next_button.pack(
             side="left",
             padx=(10, 0)
         )
@@ -487,7 +821,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         if file_path:
             self.load_and_display(file_path)
 
-    # LOAD + DISPLAY (shared by open/drop/recent)
+    # LOAD + DISPLAY (shared by open/drop/recent/review)
     def load_and_display(self, file_path):
 
         try:
@@ -693,236 +1027,23 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.update()
 
     # -----------------------------------------
-    # EXPORT
+    # ERROR
     # -----------------------------------------
 
-    def export_info(self):
+    def show_error(self, message):
 
-        if not self.current_data:
-            self.show_message("Export", "No image loaded to export.")
-            return
+        error_window = ctk.CTkToplevel(self)
 
-        self.ask_export_format()
+        error_window.title("Error")
+        error_window.geometry("400x180")
 
-    def ask_export_format(self):
-
-        format_window = ctk.CTkToplevel(self)
-
-        format_window.title("Export Format")
-        format_window.geometry("320x170")
-
-        format_window.resizable(
+        error_window.resizable(
             False,
             False
         )
 
         label = ctk.CTkLabel(
-            format_window,
-            text="Choose an export format:",
-            font=ctk.CTkFont(
-                size=15
-            )
-        )
-
-        label.pack(
-            pady=(30, 20)
-        )
-
-        button_frame = ctk.CTkFrame(
-            format_window,
-            fg_color="transparent"
-        )
-
-        button_frame.pack()
-
-        json_button = ctk.CTkButton(
-            button_frame,
-            text="JSON",
-            width=110,
-            command=lambda: self.choose_export_location(
-                "json",
-                format_window
-            )
-        )
-
-        json_button.pack(
-            side="left",
-            padx=10
-        )
-
-        csv_button = ctk.CTkButton(
-            button_frame,
-            text="CSV",
-            width=110,
-            command=lambda: self.choose_export_location(
-                "csv",
-                format_window
-            )
-        )
-
-        csv_button.pack(
-            side="left",
-            padx=10
-        )
-
-    def choose_export_location(self, file_format, format_window):
-
-        format_window.destroy()
-
-        default_name = f"{self.current_data['path'].stem}.{file_format}"
-
-        file_path = filedialog.asksaveasfilename(
-            title="Save exported file",
-            defaultextension=f".{file_format}",
-            initialfile=default_name,
-            filetypes=[
-                (
-                    f"{file_format.upper()} files",
-                    f"*.{file_format}"
-                )
-            ]
-        )
-
-        if not file_path:
-            return
-
-        try:
-
-            if file_format == "json":
-                main.export_to_json(self.current_data, file_path)
-            else:
-                main.export_to_csv(self.current_data, file_path)
-
-            self.show_message(
-                "Export",
-                "File exported successfully."
-            )
-
-        except OSError:
-
-            self.show_message(
-                "Error",
-                "Could not save the export file."
-            )
-
-    # -----------------------------------------
-    # SETTINGS
-    # -----------------------------------------
-
-    def open_settings(self):
-
-        settings_window = ctk.CTkToplevel(self)
-
-        settings_window.title("Settings")
-        settings_window.geometry("320x280")
-
-        settings_window.resizable(
-            False,
-            False
-        )
-
-        appearance_title = ctk.CTkLabel(
-            settings_window,
-            text="Appearance Mode",
-            font=ctk.CTkFont(
-                size=14,
-                weight="bold"
-            )
-        )
-
-        appearance_title.pack(
-            pady=(25, 10)
-        )
-
-        appearance_menu = ctk.CTkSegmentedButton(
-            settings_window,
-            values=["Light", "Dark"],
-            command=self.change_appearance_mode
-        )
-
-        appearance_menu.set(ctk.get_appearance_mode())
-
-        appearance_menu.pack(
-            pady=(0, 25)
-        )
-
-        color_title = ctk.CTkLabel(
-            settings_window,
-            text="Accent Color",
-            font=ctk.CTkFont(
-                size=14,
-                weight="bold"
-            )
-        )
-
-        color_title.pack(
-            pady=(0, 10)
-        )
-
-        color_menu = ctk.CTkOptionMenu(
-            settings_window,
-            values=list(COLOR_PALETTE.keys()),
-            command=self.apply_accent_color,
-            width=180
-        )
-
-        color_menu.set(self.accent_color)
-
-        color_menu.pack(
-            pady=(0, 20)
-        )
-
-    def change_appearance_mode(self, mode):
-
-        ctk.set_appearance_mode(mode)
-
-    def apply_accent_color(self, color_name):
-
-        self.accent_color = color_name
-        palette = COLOR_PALETTE[color_name]
-
-        self.title_label.configure(
-            text_color=palette["text"]
-        )
-
-        self.preview_label.configure(
-            text_color=palette["text"]
-        )
-
-        self.open_button.configure(
-            fg_color=palette["fg"],
-            hover_color=palette["hover"]
-        )
-
-        for button in (
-            self.copy_button,
-            self.export_button,
-            self.settings_button,
-            self.exit_button
-        ):
-            button.configure(
-                border_color=palette["border"],
-                text_color=palette["text"]
-            )
-
-    # -----------------------------------------
-    # MESSAGE / ERROR
-    # -----------------------------------------
-
-    def show_message(self, title, message):
-
-        message_window = ctk.CTkToplevel(self)
-
-        message_window.title(title)
-        message_window.geometry("400x180")
-
-        message_window.resizable(
-            False,
-            False
-        )
-
-        label = ctk.CTkLabel(
-            message_window,
+            error_window,
             text=message,
             font=ctk.CTkFont(
                 size=15
@@ -935,17 +1056,13 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
         button = ctk.CTkButton(
-            message_window,
+            error_window,
             text="OK",
             width=100,
-            command=message_window.destroy
+            command=error_window.destroy
         )
 
         button.pack()
-
-    def show_error(self, message):
-
-        self.show_message("Error", message)
 
 
 if __name__ == "__main__":
