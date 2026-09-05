@@ -8,10 +8,12 @@ from PIL import UnidentifiedImageError
 
 from ..core.image import load_image
 from ..core.converters import exif_value
+from ..core.scoring import grade_student
 from ..storage.recent_files import load_recent_files, add_recent_file
 
 from .image_viewer import ImageViewer
 from .metadata_panel import MetadataPanel
+from .rule_engine import RuleEngineScreen
 from .widgets import show_error
 
 
@@ -38,6 +40,10 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.student_count = 0
         self.students = []
         self.current_student_index = 0
+
+        # Rule Engine
+        self.rule_config = None
+        self.current_grading = None
 
         # Main frame
         self.main_frame = ctk.CTkFrame(
@@ -371,7 +377,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 )
                 return
 
-            self.start_review()
+            self.show_rule_engine_screen()
 
         ctk.CTkButton(
             container,
@@ -382,6 +388,24 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             hover_color="#27AE60",
             command=on_start_review
         ).pack(pady=(10, 0))
+
+    # -----------------------------------------
+    # RULE ENGINE
+    # -----------------------------------------
+
+    def show_rule_engine_screen(self):
+
+        self.clear_main_frame()
+
+        RuleEngineScreen(
+            self.main_frame,
+            on_continue=self.on_rules_configured
+        )
+
+    def on_rules_configured(self, config):
+
+        self.rule_config = config
+        self.start_review()
 
     # -----------------------------------------
     # REVIEW
@@ -659,11 +683,20 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             self.current_image = data["image"]
             self.current_data = data
 
+            self.current_grading = None
+
+            if self.rule_config is not None:
+                self.current_grading = grade_student(
+                    data,
+                    self.rule_config.rules,
+                    self.rule_config.system_score
+                )
+
             self.image_viewer.update(
                 self.current_image
             )
 
-            self.metadata_panel.update(data)
+            self.metadata_panel.update(data, self.current_grading)
 
             add_recent_file(data["path"])
             self.refresh_recent_menu()
