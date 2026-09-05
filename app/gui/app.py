@@ -11,6 +11,7 @@ from ..core.converters import exif_value
 from ..core.scoring import grade_student
 from ..storage.recent_files import load_recent_files, add_recent_file
 
+from .home_screen import HomeScreen
 from .image_viewer import ImageViewer
 from .metadata_panel import MetadataPanel
 from .rule_engine import RuleEngineScreen
@@ -36,7 +37,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.current_data = None
         self.recent_map = {}
 
-        # Student workflow
+        # Class / student workflow
+        self.class_name = None
         self.student_count = 0
         self.students = []
         self.current_student_index = 0
@@ -70,71 +72,35 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             widget.destroy()
 
     # -----------------------------------------
-    # SETUP STEP 1
+    # SETUP STEP 1 — HOME PAGE
     # -----------------------------------------
 
     def show_setup_count_screen(self):
+        """
+        Home page: Welcome + Previous Classes (placeholder UI) +
+        New Class form. Kept under the original method name so
+        nothing else in the app has to change how it starts the
+        setup flow.
+        """
 
         self.clear_main_frame()
 
-        frame = ctk.CTkFrame(
+        HomeScreen(
             self.main_frame,
-            fg_color="transparent"
+            on_continue=self.on_home_continue
         )
 
-        frame.pack(expand=True)
+    def on_home_continue(self, class_name, student_count):
+        """
+        Called by HomeScreen once the New Class form validates.
+        Stores class_name for later use and continues the existing
+        student-count workflow unchanged.
+        """
 
-        ctk.CTkLabel(
-            frame,
-            text="📷  Image Metadata — Class Review Setup",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color="#7CFFB2"
-        ).pack(pady=(0, 25))
+        self.class_name = class_name
+        self.student_count = student_count
 
-        ctk.CTkLabel(
-            frame,
-            text="How many students?",
-            font=ctk.CTkFont(size=16)
-        ).pack(pady=(0, 10))
-
-        count_entry = ctk.CTkEntry(
-            frame,
-            width=200,
-            justify="center"
-        )
-
-        count_entry.pack(pady=(0, 10))
-
-        error_label = ctk.CTkLabel(
-            frame,
-            text="",
-            text_color="#FF6B6B"
-        )
-
-        error_label.pack(pady=(0, 10))
-
-        def on_continue():
-
-            value = count_entry.get().strip()
-
-            if not value.isdigit() or int(value) <= 0:
-                error_label.configure(
-                    text="Please enter a positive whole number."
-                )
-                return
-
-            self.student_count = int(value)
-            self.show_setup_names_screen()
-
-        ctk.CTkButton(
-            frame,
-            text="Continue",
-            width=150,
-            height=40,
-            fg_color="#1F8F4C",
-            hover_color="#27AE60",
-            command=on_continue
-        ).pack()
+        self.show_setup_names_screen()
 
     # -----------------------------------------
     # SETUP STEP 2
