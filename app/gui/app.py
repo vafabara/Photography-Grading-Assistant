@@ -9,12 +9,14 @@ from PIL import UnidentifiedImageError
 from ..core.image import load_image
 from ..core.converters import exif_value
 from ..core.scoring import grade_student
+from ..core.student import ImageRecord
 from ..storage.recent_files import load_recent_files, add_recent_file
 
 from .home_screen import HomeScreen
 from .image_viewer import ImageViewer
 from .metadata_panel import MetadataPanel
 from .rule_engine import RuleEngineScreen
+from .student_setup import StudentFoldersScreen
 from .widgets import show_error
 
 
@@ -41,11 +43,18 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.class_name = None
         self.student_count = 0
         self.students = []
-        self.current_student_index = 0
+
+        # Populated once folders are selected (student_setup.py):
+        # one core.student.Student per name, each with its own
+        # core.student.ImageRecord list. image_records is the same
+        # ImageRecords flattened into the single ordered sequence
+        # the review flow steps through.
+        self.class_students = []
+        self.image_records = []
+        self.current_image_index = 0
 
         # Rule Engine
         self.rule_config = None
-        self.current_grading = None
 
         # Main frame
         self.main_frame = ctk.CTkFrame(
@@ -194,10 +203,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 return
 
             self.students = [
-                {
-                    "name": name,
-                    "image_path": None
-                }
+                {"name": name}
                 for name in names
             ]
 
@@ -214,146 +220,44 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         ).pack(pady=(10, 0))
 
     # -----------------------------------------
-    # SETUP STEP 3
+    # SETUP STEP 3 — SELECT FOLDER PER STUDENT
     # -----------------------------------------
 
     def show_setup_photos_screen(self):
+        """
+        Kept under the original method name so nothing else in the
+        app has to change how it continues the setup flow. Delegates
+        to StudentFoldersScreen (new feature: Select Image -> Select
+        Folder, multiple photos per student).
+        """
 
         self.clear_main_frame()
 
-        container = ctk.CTkFrame(
+        StudentFoldersScreen(
             self.main_frame,
-            fg_color="transparent"
+            students=self.students,
+            on_continue=self.on_folders_selected
         )
 
-        container.pack(
-            fill="both",
-            expand=True,
-            padx=40,
-            pady=30
-        )
+    def on_folders_selected(self, class_students):
+        """
+        Called by StudentFoldersScreen once every student has a
+        valid, validated photo folder. `class_students` is a list of
+        core.student.Student, each already holding one ImageRecord
+        per discovered photo. Flatten those into the single ordered
+        sequence the review flow steps through, preserving student
+        order and each student's own photo order.
+        """
 
-        ctk.CTkLabel(
-            container,
-            text="Assign a Photo to Each Student",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color="#7CFFB2"
-        ).pack(pady=(0, 15))
+        self.class_students = class_students
 
-        scroll_frame = ctk.CTkScrollableFrame(
-            container,
-            fg_color="transparent"
-        )
+        self.image_records = [
+            image_record
+            for student in class_students
+            for image_record in student.images
+        ]
 
-        scroll_frame.pack(
-            fill="both",
-            expand=True
-        )
-
-        self.photo_status_labels = []
-
-        error_label = ctk.CTkLabel(
-            container,
-            text="",
-            text_color="#FF6B6B"
-        )
-
-        def select_photo(index):
-
-            file_path = filedialog.askopenfilename(
-                title="Select an image",
-                filetypes=[
-                    (
-                        "Image files",
-                        "*.jpg *.jpeg *.png *.webp *.bmp *.tiff"
-                    ),
-                    (
-                        "All files",
-                        "*.*"
-                    )
-                ]
-            )
-
-            if not file_path:
-                return
-
-            self.students[index]["image_path"] = file_path
-
-            self.photo_status_labels[index].configure(
-                text="✅ Image selected",
-                text_color="#7CFFB2"
-            )
-
-        for i, student in enumerate(self.students):
-
-            row = ctk.CTkFrame(
-                scroll_frame,
-                fg_color="transparent"
-            )
-
-            row.pack(
-                fill="x",
-                pady=8
-            )
-
-            ctk.CTkLabel(
-                row,
-                text=f"Student: {student['name']}",
-                width=220,
-                anchor="w",
-                font=ctk.CTkFont(
-                    size=14,
-                    weight="bold"
-                )
-            ).pack(
-                side="left",
-                padx=(0, 10)
-            )
-
-            ctk.CTkButton(
-                row,
-                text="Select Photo",
-                width=130,
-                command=lambda i=i: select_photo(i)
-            ).pack(
-                side="left",
-                padx=(0, 10)
-            )
-
-            status_label = ctk.CTkLabel(
-                row,
-                text="No image selected",
-                text_color="gray60"
-            )
-
-            status_label.pack(side="left")
-
-            self.photo_status_labels.append(status_label)
-
-        error_label.pack(pady=(10, 5))
-
-        def on_start_review():
-
-            if any(
-                student["image_path"] is None
-                for student in self.students
-            ):
-                error_label.configure(
-                    text="Please select an image for every student before starting."
-                )
-                return
-
-            self.show_rule_engine_screen()
-
-        ctk.CTkButton(
-            container,
-            text="Start Review",
-            width=180,
-            height=40,
-            fg_color="#1F8F4C",
-            hover_color="#27AE60",
-            command=on_start_review
-        ).pack(pady=(10, 0))
+        self.show_rule_engine_screen()
 
     # -----------------------------------------
     # RULE ENGINE
@@ -369,8 +273,20 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
     def on_rules_configured(self, config):
+        """
+        Applies the professor's System/Human score split to every
+        photo in the review queue (new feature: Teacher Grading).
+        The split itself always comes from `config` -- nothing here
+        hard-codes a specific weighting -- so 40/60, 30/70, etc. all
+        just work.
+        """
 
         self.rule_config = config
+
+        for image_record in self.image_records:
+            image_record.rule_engine_max_score = config.system_score
+            image_record.teacher_max_score = config.human_score
+
         self.start_review()
 
     # -----------------------------------------
@@ -379,7 +295,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def start_review(self):
 
-        self.current_student_index = 0
+        self.current_image_index = 0
 
         self.clear_main_frame()
 
@@ -389,7 +305,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.create_bottom_bar()
 
         self.refresh_recent_menu()
-        self.load_current_student()
+        self.load_current_image()
 
     def create_student_bar(self):
 
@@ -413,28 +329,32 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.student_label.pack(side="left")
 
-    def load_current_student(self):
+    def load_current_image(self):
+        """
+        Loads and displays the ImageRecord at current_image_index
+        (renamed from load_current_student now that the queue is
+        photos, not one-per-student).
+        """
 
-        student = self.students[
-            self.current_student_index
-        ]
+        image_record = self.image_records[self.current_image_index]
 
         self.student_label.configure(
-            text=f"Student: {student['name']}"
+            text=f"Student: {image_record.student_name}"
         )
 
         self.load_and_display(
-            student["image_path"]
+            str(image_record.image_path),
+            image_record=image_record
         )
 
-    def next_student(self):
+    def next_image(self):
 
-        self.current_student_index += 1
+        self.current_image_index += 1
 
-        if self.current_student_index >= len(self.students):
+        if self.current_image_index >= len(self.image_records):
             self.show_done_screen()
         else:
-            self.load_current_student()
+            self.load_current_image()
 
     def show_done_screen(self):
 
@@ -511,8 +431,26 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
         self.metadata_panel = MetadataPanel(
-            self.content
+            self.content,
+            on_teacher_confirm=self.on_teacher_confirm
         )
+
+    # -----------------------------------------
+    # TEACHER GRADING
+    # -----------------------------------------
+
+    def on_teacher_confirm(self, image_record):
+        """
+        Called by TeacherGradingPanel once a Teacher Grading score is
+        confirmed for the photo on screen. The ImageRecord already
+        carries teacher_score/total_score at this point -- nothing
+        else needs to happen yet. Placeholder hook for the next
+        stage (Student Average / DataFrame / Final Results), the
+        same way HomeScreen.handle_delete_class is a placeholder
+        until real storage exists.
+        """
+
+        pass
 
     # -----------------------------------------
     # BOTTOM BAR
@@ -588,7 +526,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 size=14,
                 weight="bold"
             ),
-            command=self.next_student
+            command=self.next_image
         )
 
         self.next_button.pack(
@@ -640,7 +578,20 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.load_and_display(file_path)
 
-    def load_and_display(self, file_path):
+    def load_and_display(self, file_path, image_record=None):
+        """
+        Loads `file_path` and renders it. `image_record` is the
+        core.student.ImageRecord this photo belongs to during the
+        official review flow (student/photo already known, Teacher
+        Grading state preserved across re-renders).
+
+        When called without one -- Open Image, drag & drop, or
+        Recent Files, all of which can point at any photo outside
+        the review queue -- a scratch ImageRecord is created just so
+        MetadataPanel / Teacher Grading has something to render. It
+        isn't added to self.image_records, so it never affects the
+        Next button or the official per-student results.
+        """
 
         try:
 
@@ -649,20 +600,35 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             self.current_image = data["image"]
             self.current_data = data
 
-            self.current_grading = None
+            grading = None
 
             if self.rule_config is not None:
-                self.current_grading = grade_student(
+                grading = grade_student(
                     data,
                     self.rule_config.rules,
                     self.rule_config.system_score
                 )
 
+            if image_record is None:
+                image_record = ImageRecord(
+                    student_name="",
+                    image_path=Path(file_path)
+                )
+
+            image_record.grading_result = grading
+
+            if grading is not None:
+                image_record.rule_engine_score = grading.technical_score
+                image_record.rule_engine_max_score = grading.system_score
+
+            if self.rule_config is not None:
+                image_record.teacher_max_score = self.rule_config.human_score
+
             self.image_viewer.update(
                 self.current_image
             )
 
-            self.metadata_panel.update(data, self.current_grading)
+            self.metadata_panel.update(data, image_record)
 
             add_recent_file(data["path"])
             self.refresh_recent_menu()

@@ -2,6 +2,7 @@ import customtkinter as ctk
 
 from ..core.converters import exif_value
 from ..core.scoring import GREEN, YELLOW, RED, MISSING
+from .teacher_grading import TeacherGradingPanel
 from .widgets import create_info_label
 
 # Colors for each Rule status. A factor with no rule defined for it
@@ -27,7 +28,9 @@ FACTOR_LABEL_ATTRS = {
 
 class MetadataPanel:
 
-    def __init__(self, parent):
+    def __init__(self, parent, on_teacher_confirm=None):
+
+        self.on_teacher_confirm = on_teacher_confirm
 
         self.frame = ctk.CTkScrollableFrame(
             parent,
@@ -53,7 +56,7 @@ class MetadataPanel:
 
         self.score_title = ctk.CTkLabel(
             self.frame,
-            text="🏆  Technical Score",
+            text="🏆  Scoring",
             font=ctk.CTkFont(
                 size=20,
                 weight="bold"
@@ -63,20 +66,12 @@ class MetadataPanel:
         self.score_title.pack(
             anchor="w",
             padx=20,
-            pady=(20, 5)
+            pady=(20, 10)
         )
 
-        self.score_value_label = ctk.CTkLabel(
+        self.teacher_grading_panel = TeacherGradingPanel(
             self.frame,
-            text="—",
-            font=ctk.CTkFont(size=16),
-            text_color="#7CFFB2"
-        )
-
-        self.score_value_label.pack(
-            anchor="w",
-            padx=20,
-            pady=(0, 10)
+            on_confirm=self.on_teacher_confirm
         )
 
         self.score_separator = ctk.CTkFrame(
@@ -88,7 +83,7 @@ class MetadataPanel:
         self.score_separator.pack(
             fill="x",
             padx=20,
-            pady=(0, 20)
+            pady=(10, 20)
         )
 
     def create_file_section(self):
@@ -217,14 +212,17 @@ class MetadataPanel:
             "White Balance: —"
         )
 
-    def update(self, data, grading=None):
+    def update(self, data, image_record):
         """
-        `grading` is an optional core.scoring.GradingResult. When
-        given, camera-setting fields are colored by their Rule
-        status and the Technical Score banner is filled in. When
-        None (no Rule Engine configured yet), fields stay white and
-        the score shows "—".
+        `image_record` is a core.student.ImageRecord for the photo
+        currently on screen. Camera-setting fields are colored by
+        the Rule status in image_record.grading_result (white if
+        there's no grading yet, or no rule was set for that factor),
+        and the Teacher Grading panel is refreshed to show this
+        photo's Rule Engine / Teacher / Total numbers.
         """
+
+        grading = image_record.grading_result
 
         size = data["size"]
 
@@ -296,13 +294,14 @@ class MetadataPanel:
             text=f"White Balance: {exif_value(data['white_balance'])}"
         )
 
-        self.update_score(grading)
+        self.teacher_grading_panel.update(image_record)
 
     def status_color(self, grading, factor):
         """
-        Look up this factor's Rule status in `grading` and return the
-        color to display it in. NO_RULE_COLOR (white) if there's no
-        grading yet, or no rule was set for this factor.
+        Look up this factor's Rule status in `grading` (a
+        core.scoring.GradingResult) and return the color to display
+        it in. NO_RULE_COLOR (white) if there's no grading yet, or
+        no rule was set for this factor.
         """
 
         if grading is None:
@@ -313,13 +312,3 @@ class MetadataPanel:
                 return STATUS_COLORS.get(result.status, NO_RULE_COLOR)
 
         return NO_RULE_COLOR
-
-    def update_score(self, grading):
-
-        if grading is None:
-            self.score_value_label.configure(text="—")
-            return
-
-        self.score_value_label.configure(
-            text=f"{grading.technical_score:g} / {grading.system_score:g}"
-        )

@@ -56,3 +56,77 @@ def load_image(loc):
         # EXIF metadata
         **metadata,
     }
+
+
+# -----------------------------------------------------------------
+# STUDENT FOLDER DISCOVERY (new feature: Select Folder instead of
+# Select Image, one folder per student, multiple photos each)
+# -----------------------------------------------------------------
+# Matches the formats already offered in the "Select Photo" /
+# "Open Image" file dialogs elsewhere in the app, so a folder scan
+# never rejects a file the rest of the app would have accepted.
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
+
+MAX_IMAGES_PER_STUDENT = 20
+MAX_FOLDER_SIZE_MB = 100
+
+
+class FolderValidationError(ValueError):
+    """Raised when a student's photo folder fails validation."""
+
+
+def discover_images(folder_path):
+    """
+    Return every valid image file directly inside `folder_path`,
+    sorted by filename. Only files whose extension is in
+    IMAGE_EXTENSIONS are counted -- anything else (a stray .txt,
+    .psd, folder, etc.) is ignored rather than crashing the scan.
+    """
+
+    folder_path = Path(folder_path)
+
+    return sorted(
+        path for path in folder_path.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
+def scan_student_folder(folder_path):
+    """
+    Discover and validate the images inside one student's folder.
+
+    Returns the list of image Paths on success.
+
+    Raises FolderValidationError (with a message ready to show
+    directly in the GUI) if:
+      - the folder has no supported images at all
+      - the folder has more than MAX_IMAGES_PER_STUDENT images
+      - the images inside total more than MAX_FOLDER_SIZE_MB
+
+    This runs before any Rule Engine / Teacher Grading processing
+    starts, so a bad folder never gets partway into the review flow.
+    """
+
+    images = discover_images(folder_path)
+
+    if not images:
+        raise FolderValidationError(
+            "This folder does not contain any supported image files."
+        )
+
+    if len(images) > MAX_IMAGES_PER_STUDENT:
+        raise FolderValidationError(
+            f"This folder contains more than {MAX_IMAGES_PER_STUDENT} images."
+        )
+
+    total_size_mb = sum(
+        path.stat().st_size for path in images
+    ) / (1024 ** 2)
+
+    if total_size_mb > MAX_FOLDER_SIZE_MB:
+        raise FolderValidationError(
+            f"The total image size exceeds the {MAX_FOLDER_SIZE_MB} MB limit."
+        )
+
+    return images
