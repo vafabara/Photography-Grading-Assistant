@@ -19,7 +19,7 @@ class RuleEngineScreen:
     RuleEngineConfig once the input validates.
     """
 
-    def __init__(self, parent, on_continue):
+    def __init__(self, parent, on_continue, banner_text=None):
 
         self.on_continue = on_continue
         self.factor_entries = {}
@@ -35,6 +35,17 @@ class RuleEngineScreen:
             padx=40,
             pady=30
         )
+
+        if banner_text:
+            # New feature: Class Management -- shown once, right
+            # above the Rule Engine title, after a class has just
+            # been created and saved (spec section 5).
+            ctk.CTkLabel(
+                self.container,
+                text=f"✅ {banner_text}",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                text_color="#7CFFB2"
+            ).pack(pady=(0, 10))
 
         ctk.CTkLabel(
             self.container,

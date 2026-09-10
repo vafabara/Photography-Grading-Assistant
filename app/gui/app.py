@@ -10,12 +10,16 @@ from ..core.image import load_image
 from ..core.converters import exif_value
 from ..core.scoring import grade_student
 from ..core.student import ImageRecord
+from ..core.class_model import build_class_record, validate_new_student_name, ClassError, ClassStudentEntry
 from ..storage.recent_files import load_recent_files, add_recent_file
+from ..storage.class_storage import save_class, load_all_classes, load_class, delete_class
 
+from .class_screen import ClassScreen
 from .home_screen import HomeScreen
 from .image_viewer import ImageViewer
 from .metadata_panel import MetadataPanel
 from .rule_engine import RuleEngineScreen
+from .student_detail import StudentDetailScreen
 from .student_setup import StudentFoldersScreen
 from .widgets import show_error
 
@@ -86,17 +90,23 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def show_setup_count_screen(self):
         """
-        Home page: Welcome + Previous Classes (placeholder UI) +
-        New Class form. Kept under the original method name so
-        nothing else in the app has to change how it starts the
-        setup flow.
+        Home page: Welcome + Previous Classes (now backed by real,
+        persisted classes -- new feature: Class Management) + New
+        Class form. Kept under the original method name so nothing
+        else in the app has to change how it starts the setup flow
+        or returns to Home.
         """
 
         self.clear_main_frame()
 
+        classes = load_all_classes()
+
         HomeScreen(
             self.main_frame,
-            on_continue=self.on_home_continue
+            classes=classes,
+            on_continue=self.on_home_continue,
+            on_open_class=self.on_open_class,
+            on_delete_class=self.on_delete_class
         )
 
     def on_home_continue(self, class_name, student_count):
@@ -244,9 +254,14 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         Called by StudentFoldersScreen once every student has a
         valid, validated photo folder. `class_students` is a list of
         core.student.Student, each already holding one ImageRecord
-        per discovered photo. Flatten those into the single ordered
-        sequence the review flow steps through, preserving student
-        order and each student's own photo order.
+        per discovered photo.
+
+        This is also the point where the Class actually gets created
+        and persisted (new feature: Class Management, spec section
+        3) -- Rule Engine is NOT a condition for the class to exist.
+        If two students ended up with the same name, that's caught
+        here and sent back to the names step rather than silently
+        saved.
         """
 
         self.class_students = class_students
@@ -257,19 +272,31 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             for image_record in student.images
         ]
 
-        self.show_rule_engine_screen()
+        try:
+            class_record = build_class_record(self.class_name, class_students)
+        except ClassError as error:
+            show_error(self, str(error))
+            self.show_setup_names_screen()
+            return
+
+        save_class(class_record)
+
+        self.show_rule_engine_screen(
+            banner_text=f'Class "{class_record.class_name}" created'
+        )
 
     # -----------------------------------------
     # RULE ENGINE
     # -----------------------------------------
 
-    def show_rule_engine_screen(self):
+    def show_rule_engine_screen(self, banner_text=None):
 
         self.clear_main_frame()
 
         RuleEngineScreen(
             self.main_frame,
-            on_continue=self.on_rules_configured
+            on_continue=self.on_rules_configured,
+            banner_text=banner_text
         )
 
     def on_rules_configured(self, config):
@@ -288,6 +315,129 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             image_record.teacher_max_score = config.human_score
 
         self.start_review()
+
+    # -----------------------------------------
+    # CLASS SCREEN / STUDENT DETAIL
+    # (new feature: Class Management, spec sections 8-16)
+    # -----------------------------------------
+
+    def on_open_class(self, class_id):
+        """
+        Called by HomeScreen when a Previous Classes row is clicked.
+        """
+
+        self.open_class_screen(class_id)
+
+    def open_class_screen(self, class_id):
+        """
+        Loads a ClassRecord fresh from storage and shows it -- every
+        mutation (add/remove student, add photos) re-enters here
+        instead of reusing an in-memory copy, so the screen always
+        reflects what's actually on disk (spec section 7/17).
+        """
+
+        class_record = load_class(class_id)
+
+        if class_record is None:
+            show_error(self, "This class could not be found.")
+            self.show_setup_count_screen()
+            return
+
+        self.show_class_screen(class_record)
+
+    def show_class_screen(self, class_record):
+
+        self.clear_main_frame()
+
+        ClassScreen(
+            self.main_frame,
+            class_record=class_record,
+            on_back=self.show_setup_count_screen,
+            on_open_student=self.on_open_student,
+            on_add_student=self.on_add_student_to_class,
+            on_add_photos=self.on_add_photos_to_class,
+            on_delete_student=self.on_delete_student_from_class
+        )
+
+    def on_delete_class(self, class_id):
+        """
+        Called by HomeScreen only after the professor confirms the
+        Yes/No dialog. Deletes just this class's storage folder --
+        never the student photo folders on disk (spec section 11) --
+        then refreshes Home.
+        """
+
+        delete_class(class_id)
+        self.show_setup_count_screen()
+
+    def on_open_student(self, class_record, student_index):
+
+        student = class_record.students[student_index]
+
+        self.clear_main_frame()
+
+        StudentDetailScreen(
+            self.main_frame,
+            student=student,
+            on_back=lambda: self.open_class_screen(class_record.class_id)
+        )
+
+    def on_add_student_to_class(self, class_record, name, folder_path, photo_count):
+        """
+        Called by ClassScreen's Add New Student dialog once a folder
+        has already been picked and scanned. Validates the name is
+        non-blank and not a duplicate (spec section 20) before
+        persisting -- ClassScreen itself never writes storage.
+        """
+
+        try:
+            name = validate_new_student_name(class_record, name)
+        except ClassError as error:
+            show_error(self, str(error))
+            return
+
+        class_record.students.append(
+            ClassStudentEntry(
+                name=name,
+                folder_path=folder_path,
+                photo_count=photo_count
+            )
+        )
+
+        save_class(class_record)
+        self.open_class_screen(class_record.class_id)
+
+    def on_add_photos_to_class(self, class_record, student_index, folder_path, photo_count):
+        """
+        Called by ClassScreen after a new folder has been picked and
+        scanned for an existing student (spec section 14). Photo
+        counts only ever get *added to* -- selecting the exact same
+        folder again re-scans it instead of doubling the count, as a
+        simple guard against double counting (spec section 14).
+        """
+
+        student = class_record.students[student_index]
+
+        if folder_path == student.folder_path:
+            student.photo_count = photo_count
+        else:
+            student.photo_count += photo_count
+            student.folder_path = folder_path
+
+        save_class(class_record)
+        self.open_class_screen(class_record.class_id)
+
+    def on_delete_student_from_class(self, class_record, student_index):
+        """
+        Called by ClassScreen only after the professor confirms the
+        Yes/No dialog. Removes the student from the class only --
+        never touches their photo folder on disk (spec section 15).
+        """
+
+        del class_record.students[student_index]
+
+        save_class(class_record)
+        self.open_class_screen(class_record.class_id)
 
     # -----------------------------------------
     # REVIEW

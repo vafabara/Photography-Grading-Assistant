@@ -1,5 +1,7 @@
 import customtkinter as ctk
 
+from .widgets import show_confirm
+
 
 class HomeScreen:
     """
@@ -10,21 +12,24 @@ class HomeScreen:
     `on_continue(class_name, student_count)` once the New Class
     form validates.
 
-    Previous Classes and Delete are UI-only placeholders for now —
-    no data source, no persistence, no real delete logic.
+    Previous Classes is now backed by real, persisted classes (new
+    feature: Class Management) -- `classes` is a list of
+    core.class_model.ClassRecord that App already loaded from
+    storage.class_storage. This screen only renders them and reports
+    back what the professor clicked; it never touches storage or
+    JSON itself (spec section 17):
+
+      - clicking a class name calls `on_open_class(class_id)`
+      - clicking Delete asks for confirmation right here, and only
+        calls `on_delete_class(class_id)` if the professor picks Yes
     """
 
-    # Placeholder sample data so the Previous Classes card isn't
-    # empty. Not connected to any storage — purely cosmetic until a
-    # real class database exists.
-    SAMPLE_PREVIOUS_CLASSES = [
-        "Photography 101 - Fall",
-        "Intro to Composition",
-    ]
+    def __init__(self, parent, classes, on_continue, on_open_class, on_delete_class):
 
-    def __init__(self, parent, on_continue):
-
+        self.classes = classes
         self.on_continue = on_continue
+        self.on_open_class = on_open_class
+        self.on_delete_class = on_delete_class
 
         self.container = ctk.CTkFrame(
             parent,
@@ -154,14 +159,25 @@ class HomeScreen:
             pady=(0, 15)
         )
 
-        for class_name in self.SAMPLE_PREVIOUS_CLASSES:
-            self.create_previous_class_row(class_name)
+        if not self.classes:
 
-    def create_previous_class_row(self, class_name):
+            ctk.CTkLabel(
+                self.previous_classes_frame,
+                text="No classes yet",
+                text_color="gray60"
+            ).pack(pady=20)
+
+            return
+
+        for class_record in self.classes:
+            self.create_previous_class_row(class_record)
+
+    def create_previous_class_row(self, class_record):
         """
-        One row in the Previous Classes list: class name + a Delete
-        icon. Placeholder only — clicking Delete does nothing yet,
-        and the row itself isn't clickable/enterable.
+        One row in the Previous Classes list: class name + a
+        "N Students • M Photos" subtitle + a Delete icon. Clicking
+        the name/subtitle opens the class (on_open_class); clicking
+        Delete asks for confirmation before removing anything.
         """
 
         row = ctk.CTkFrame(
@@ -174,17 +190,53 @@ class HomeScreen:
             pady=4
         )
 
-        ctk.CTkLabel(
+        text_column = ctk.CTkFrame(
             row,
-            text=class_name,
-            anchor="w",
-            font=ctk.CTkFont(size=14)
-        ).pack(
+            fg_color="transparent",
+            cursor="hand2"
+        )
+
+        text_column.pack(
             side="left",
             fill="x",
             expand=True,
             padx=(10, 10)
         )
+
+        name_label = ctk.CTkLabel(
+            text_column,
+            text=class_record.class_name,
+            anchor="w",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+
+        name_label.pack(
+            anchor="w",
+            fill="x"
+        )
+
+        subtitle_label = ctk.CTkLabel(
+            text_column,
+            text=(
+                f"{class_record.student_count} Students • "
+                f"{class_record.total_photo_count} Photos"
+            ),
+            anchor="w",
+            text_color="gray60",
+            font=ctk.CTkFont(size=12)
+        )
+
+        subtitle_label.pack(
+            anchor="w",
+            fill="x"
+        )
+
+        def handle_open(event=None):
+            self.on_open_class(class_record.class_id)
+
+        text_column.bind("<Button-1>", handle_open)
+        name_label.bind("<Button-1>", handle_open)
+        subtitle_label.bind("<Button-1>", handle_open)
 
         ctk.CTkButton(
             row,
@@ -194,17 +246,21 @@ class HomeScreen:
             fg_color="transparent",
             hover_color="#3a1f1f",
             text_color="#FF6B6B",
-            command=lambda: self.handle_delete_class(class_name)
+            command=lambda: self.handle_delete_class(class_record)
         ).pack(side="right")
 
-    def handle_delete_class(self, class_name):
+    def handle_delete_class(self, class_record):
         """
-        Placeholder handler. Intentionally does nothing — no class
-        is actually removed and no state changes. Real delete logic
-        (and a confirmation step) will be added once classes are
-        backed by storage.
+        Shows a Yes/No confirmation (spec section 11) and only calls
+        on_delete_class -- App's job, not this screen's, to actually
+        touch storage -- if the professor confirms.
         """
-        pass
+
+        show_confirm(
+            self.previous_classes_frame,
+            f'Are you sure you want to delete\n"{class_record.class_name}"?',
+            on_yes=lambda: self.on_delete_class(class_record.class_id)
+        )
 
     # -----------------------------------------
     # RIGHT — NEW CLASS CARD
