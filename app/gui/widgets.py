@@ -101,8 +101,84 @@ def show_confirm(parent, message, on_yes):
         hover_color="#3a1f1f",
         border_color="#FF6B6B",
         border_width=1,
-        text_color="#FF6B6B",
         command=confirm_window.destroy
+    ).pack(
+        side="left",
+        padx=10
+    )
+
+
+def show_note_dialog(parent, initial_text, on_save):
+    """
+    Small popup for adding/editing a single photo's note (new
+    feature: Photo Notes). Calls `on_save(text)` only if the
+    professor presses Save; Cancel/closing the dialog discards any
+    typed changes.
+    """
+
+    note_window = ctk.CTkToplevel(parent)
+
+    note_window.title("Photo Note")
+    note_window.geometry("420x280")
+    note_window.resizable(False, False)
+    note_window.grab_set()
+
+    ctk.CTkLabel(
+        note_window,
+        text="Photo Note",
+        font=ctk.CTkFont(size=16, weight="bold"),
+        text_color="#7CFFB2"
+    ).pack(pady=(20, 10))
+
+    textbox = ctk.CTkTextbox(
+        note_window,
+        height=130
+    )
+
+    textbox.pack(
+        fill="both",
+        expand=True,
+        padx=20,
+        pady=(0, 15)
+    )
+
+    if initial_text:
+        textbox.insert("1.0", initial_text)
+
+    def handle_save():
+        text = textbox.get("1.0", "end").strip()
+        note_window.destroy()
+        on_save(text)
+
+    button_row = ctk.CTkFrame(
+        note_window,
+        fg_color="transparent"
+    )
+
+    button_row.pack(pady=(0, 15))
+
+    ctk.CTkButton(
+        button_row,
+        text="Save",
+        width=100,
+        fg_color="#1F8F4C",
+        hover_color="#27AE60",
+        command=handle_save
+    ).pack(
+        side="left",
+        padx=10
+    )
+
+    ctk.CTkButton(
+        button_row,
+        text="Cancel",
+        width=100,
+        fg_color="transparent",
+        hover_color="#3a1f1f",
+        border_color="#FF6B6B",
+        border_width=1,
+        text_color="#FF6B6B",
+        command=note_window.destroy
     ).pack(
         side="left",
         padx=10

@@ -59,12 +59,12 @@ def load_image(loc):
 
 
 # -----------------------------------------------------------------
-# STUDENT FOLDER DISCOVERY (new feature: Select Folder instead of
-# Select Image, one folder per student, multiple photos each)
+# STUDENT PHOTO DISCOVERY (Select Folder, and now also Select
+# Files -- new feature: single/multiple individual image selection
+# so a one-photo student doesn't need a whole folder just for one
+# image). Both entry points share the same extension/count/size
+# limits so neither path is more permissive than the other.
 # -----------------------------------------------------------------
-# Matches the formats already offered in the "Select Photo" /
-# "Open Image" file dialogs elsewhere in the app, so a folder scan
-# never rejects a file the rest of the app would have accepted.
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 
@@ -73,7 +73,7 @@ MAX_FOLDER_SIZE_MB = 100
 
 
 class FolderValidationError(ValueError):
-    """Raised when a student's photo folder fails validation."""
+    """Raised when a student's photo folder/selection fails validation."""
 
 
 def discover_images(folder_path):
@@ -130,3 +130,50 @@ def scan_student_folder(folder_path):
         )
 
     return images
+
+
+def validate_selected_files(file_paths):
+    """
+    Validate a list of individually-selected image files (new
+    feature: Select Files, as an alternative to Select Folder).
+    Enforces the same limits as scan_student_folder so neither
+    selection path is more permissive than the other.
+
+    Returns the sorted list of image Paths on success. Raises
+    FolderValidationError on the same conditions scan_student_folder
+    does (no valid images, too many images, total size too large),
+    plus rejecting any file whose extension isn't supported.
+    """
+
+    paths = [Path(file_path) for file_path in file_paths]
+
+    if not paths:
+        raise FolderValidationError(
+            "Please select at least one image file."
+        )
+
+    unsupported = [
+        path for path in paths
+        if path.suffix.lower() not in IMAGE_EXTENSIONS
+    ]
+
+    if unsupported:
+        raise FolderValidationError(
+            "One or more selected files are not supported image files."
+        )
+
+    if len(paths) > MAX_IMAGES_PER_STUDENT:
+        raise FolderValidationError(
+            f"You can select at most {MAX_IMAGES_PER_STUDENT} images."
+        )
+
+    total_size_mb = sum(
+        path.stat().st_size for path in paths
+    ) / (1024 ** 2)
+
+    if total_size_mb > MAX_FOLDER_SIZE_MB:
+        raise FolderValidationError(
+            f"The total image size exceeds the {MAX_FOLDER_SIZE_MB} MB limit."
+        )
+
+    return sorted(paths)

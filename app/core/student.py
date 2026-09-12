@@ -50,6 +50,12 @@ class ImageRecord:
     # shown again.
     grading_result: object = None
 
+    # Optional teacher note for this specific photo (new feature:
+    # Photo Notes). Mirrored into the matching
+    # core.class_model.ClassPhotoEntry.note by gui/app.py so it
+    # survives an app restart.
+    note: str = ""
+
     def is_finalized(self):
         """
         True once the professor has confirmed a Teacher Grading
@@ -64,8 +70,9 @@ class ImageRecord:
 class Student:
     """
     One student in the class. `images` stays empty until their
-    folder has been scanned by core.image.scan_student_folder() and
-    turned into ImageRecords.
+    folder/files have been scanned by core.image.scan_student_folder()
+    / core.image.validate_selected_files() and turned into
+    ImageRecords.
     """
 
     name: str

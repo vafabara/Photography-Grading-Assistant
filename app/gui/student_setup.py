@@ -2,22 +2,24 @@ import customtkinter as ctk
 from tkinter import filedialog
 from pathlib import Path
 
-from ..core.image import scan_student_folder, FolderValidationError
+from ..core.image import scan_student_folder, validate_selected_files, FolderValidationError
 from ..core.student import Student, ImageRecord
 
 
 class StudentFoldersScreen:
     """
     Setup step 3 (replaces the old one-photo-per-student screen --
-    new feature: Select Image -> Select Folder). Follows the same
-    pattern as RuleEngineScreen/HomeScreen: takes a parent frame and
-    an on_continue callback.
+    new feature: Select Image -> Select Folder, now also Select
+    Files). Follows the same pattern as RuleEngineScreen/HomeScreen:
+    takes a parent frame and an on_continue callback.
 
-    For each student, the professor picks a folder. Every valid
-    image inside it is discovered and validated against the folder
+    For each student, the professor picks a folder OR one/more
+    individual image files (new feature: single image selection, so
+    a one-photo student doesn't need a folder just for that photo).
+    Every valid image is discovered and validated against the same
     limits (max images / max total size) before the professor can
-    continue -- a bad folder shows its error right on that student's
-    row instead of crashing or silently dropping images.
+    continue -- a bad selection shows its error right on that
+    student's row instead of crashing or silently dropping images.
 
     Calls `on_continue(students)` with a list of fully-populated
     core.student.Student objects -- each with its `images` list
@@ -30,7 +32,7 @@ class StudentFoldersScreen:
         self.on_continue = on_continue
 
         # One Student per name from the previous (names) screen.
-        # folder_path/images get filled in as folders are picked.
+        # folder_path/images get filled in as folders/files are picked.
         self.class_students = [
             Student(name=entry["name"])
             for entry in students
@@ -50,7 +52,7 @@ class StudentFoldersScreen:
 
         ctk.CTkLabel(
             self.container,
-            text="Select a Photo Folder for Each Student",
+            text="Select Photos for Each Student",
             font=ctk.CTkFont(size=22, weight="bold"),
             text_color="#7CFFB2"
         ).pack(pady=(0, 15))
@@ -122,8 +124,18 @@ class StudentFoldersScreen:
             ctk.CTkButton(
                 row,
                 text="Select Folder",
-                width=130,
+                width=120,
                 command=lambda i=index: self.select_folder(i)
+            ).pack(
+                side="left",
+                padx=(0, 10)
+            )
+
+            ctk.CTkButton(
+                row,
+                text="Select Files",
+                width=120,
+                command=lambda i=index: self.select_files(i)
             ).pack(
                 side="left",
                 padx=(0, 10)
@@ -131,7 +143,7 @@ class StudentFoldersScreen:
 
             status_label = ctk.CTkLabel(
                 row,
-                text="No folder selected",
+                text="No photos selected",
                 text_color="gray60"
             )
 
@@ -186,6 +198,53 @@ class StudentFoldersScreen:
         )
 
     # -----------------------------------------
+    # FILE SELECTION (new feature: single/multiple image selection)
+    # -----------------------------------------
+
+    def select_files(self, index):
+
+        file_paths = filedialog.askopenfilenames(
+            title="Select photo file(s)"
+        )
+
+        if not file_paths:
+            return
+
+        student = self.class_students[index]
+        status_label = self.status_labels[index]
+
+        try:
+            image_paths = validate_selected_files(file_paths)
+
+        except FolderValidationError as error:
+
+            student.folder_path = None
+            student.images = []
+
+            status_label.configure(
+                text=f"⚠️ {error}",
+                text_color="#FF6B6B"
+            )
+
+            return
+
+        # No single common folder for individually-selected files.
+        student.folder_path = None
+
+        student.images = [
+            ImageRecord(
+                student_name=student.name,
+                image_path=image_path
+            )
+            for image_path in image_paths
+        ]
+
+        status_label.configure(
+            text=f"✅ {len(image_paths)} image(s) selected",
+            text_color="#7CFFB2"
+        )
+
+    # -----------------------------------------
     # VALIDATION / SUBMIT
     # -----------------------------------------
 
@@ -195,7 +254,7 @@ class StudentFoldersScreen:
 
         if any(not student.images for student in self.class_students):
             self.error_label.configure(
-                text="Please select a valid photo folder for every student."
+                text="Please select photos (folder or files) for every student."
             )
             return
 

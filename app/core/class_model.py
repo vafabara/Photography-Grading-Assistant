@@ -1,5 +1,7 @@
 """
-Data model for a persisted Class (new feature: Class Management).
+Data model for a persisted Class (new feature: Class Management,
+extended with per-photo data -- Rule Engine / Teacher / Total Score
+and Photo Notes).
 
 This is deliberately a *separate* concept from core.student.Student:
 
@@ -7,12 +9,13 @@ This is deliberately a *separate* concept from core.student.Student:
     state (scanned ImageRecord objects, Rule Engine / Teacher scores)
     for whatever review flow is currently on screen.
 
-  - ClassRecord / ClassStudentEntry hold the lightweight, JSON-safe
-    summary of a class (name, folder path, photo count) that gets
+  - ClassRecord / ClassStudentEntry / ClassPhotoEntry hold the
+    lightweight, JSON-safe summary of a class (name, students,
+    photos, and each photo's persisted scores/note) that gets
     written to disk via storage.class_storage so it survives an app
     restart. Nothing here is CustomTkinter-aware or scans folders
     itself -- that stays in core.image / student_setup.py / the
-    Class Screen, which pass already-known photo counts in here.
+    Class Screen, which pass already-known photo paths in here.
 
 No CustomTkinter dependency here (spec section 8) -- same rule as
 core/rules.py and core/scoring.py.
@@ -27,12 +30,70 @@ class ClassError(ValueError):
 
 
 @dataclass
+class ClassPhotoEntry:
+    """
+    One persisted photo belonging to one student in a Class
+    (new feature: Student DataFrame / Photo Notes). Scores start as
+    None (-> NaN in the Student DataFrame) until that photo is
+    actually graded through the existing Rule Engine / Teacher
+    Grading flow -- nothing here computes a score itself.
+    """
+
+    path: str
+    rule_engine_score: float | None = None
+    teacher_score: float | None = None
+    total_score: float | None = None
+    note: str = ""
+
+    def to_dict(self):
+        return {
+            "path": self.path,
+            "rule_engine_score": self.rule_engine_score,
+            "teacher_score": self.teacher_score,
+            "total_score": self.total_score,
+            "note": self.note,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            path=data["path"],
+            rule_engine_score=data.get("rule_engine_score"),
+            teacher_score=data.get("teacher_score"),
+            total_score=data.get("total_score"),
+            note=data.get("note", ""),
+        )
+
+
+@dataclass
 class ClassStudentEntry:
     """One student's persisted info within a Class."""
 
     name: str
     folder_path: str
     photo_count: int
+    photos: list = field(default_factory=list)  # list[ClassPhotoEntry]
+
+    @property
+    def average_total_score(self):
+        """
+        Average Total Score across this student's photos (new
+        feature: student list Avg Total column). Reads the exact
+        same `total_score` values the Student DataFrame uses -- this
+        is not a second, independent calculation. Returns float("nan")
+        if no photo has a Total Score yet, never 0.
+        """
+
+        scores = [
+            photo.total_score
+            for photo in self.photos
+            if photo.total_score is not None
+        ]
+
+        if not scores:
+            return float("nan")
+
+        return round(sum(scores) / len(scores), 1)
 
 
 @dataclass
@@ -65,6 +126,9 @@ class ClassRecord:
                     "name": student.name,
                     "folder_path": student.folder_path,
                     "photo_count": student.photo_count,
+                    "photos": [
+                        photo.to_dict() for photo in student.photos
+                    ],
                 }
                 for student in self.students
             ],
@@ -78,6 +142,10 @@ class ClassRecord:
                 name=entry["name"],
                 folder_path=entry["folder_path"],
                 photo_count=entry["photo_count"],
+                photos=[
+                    ClassPhotoEntry.from_dict(photo_data)
+                    for photo_data in entry.get("photos", [])
+                ],
             )
             for entry in data.get("students", [])
         ]
@@ -97,7 +165,10 @@ def build_class_record(class_name, class_students):
     """
     Build a ClassRecord from a list of core.student.Student objects
     -- the objects StudentFoldersScreen hands back once every
-    student has a validated photo folder (spec section 3).
+    student has a validated photo folder/file selection (spec
+    section 3). Each discovered image becomes a ClassPhotoEntry with
+    no score yet -- scores get filled in later as photos are graded
+    (see gui/app.py on_teacher_confirm).
 
     Raises ClassError if two students share the same name, case
     insensitively (spec section 20).
@@ -125,6 +196,10 @@ def build_class_record(class_name, class_students):
                 name=name,
                 folder_path=str(student.folder_path or ""),
                 photo_count=len(student.images),
+                photos=[
+                    ClassPhotoEntry(path=str(image.image_path))
+                    for image in student.images
+                ],
             )
         )
 

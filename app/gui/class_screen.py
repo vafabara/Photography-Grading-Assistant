@@ -1,22 +1,25 @@
+import math
+
 import customtkinter as ctk
 from tkinter import filedialog
 
-from ..core.image import scan_student_folder, FolderValidationError
+from ..core.image import scan_student_folder, validate_selected_files, FolderValidationError
 from .widgets import show_error, show_confirm
 
 
 class ClassScreen:
     """
     The Class Screen (spec sections 8, 9, 11, 12, 14, 15): shows one
-    persisted class's students with their photo counts, and lets the
-    professor add photos, add a new student, or delete a student.
+    persisted class's students with their photo counts and average
+    Total Score, and lets the professor add photos (folder or
+    individual files), add a new student, or delete a student.
 
     Takes a parent frame and a core.class_model.ClassRecord, and
     renders straight from it -- this screen never touches storage
-    directly (spec section 17). Folder picking / scanning happens
-    here (the same way student_setup.py already does it -- spec
-    section 13, no parallel logic), but every resulting change is
-    handed back to App through a callback, which persists it via
+    directly (spec section 17). Folder/file picking + scanning
+    happens here (the same way student_setup.py already does it --
+    spec section 13, no parallel logic), but every resulting change
+    is handed back to App through a callback, which persists it via
     storage.class_storage and re-renders this screen with the fresh
     ClassRecord:
 
@@ -32,6 +35,7 @@ class ClassScreen:
         on_add_student,
         on_add_photos,
         on_delete_student,
+        on_start_grading,
     ):
 
         self.class_record = class_record
@@ -40,6 +44,7 @@ class ClassScreen:
         self.on_add_student = on_add_student
         self.on_add_photos = on_add_photos
         self.on_delete_student = on_delete_student
+        self.on_start_grading = on_start_grading
 
         self.container = ctk.CTkFrame(
             parent,
@@ -165,7 +170,7 @@ class ClassScreen:
             row,
             text=student.name,
             anchor="w",
-            width=180,
+            width=140,
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#7CFFB2",
             cursor="hand2"
@@ -179,6 +184,23 @@ class ClassScreen:
         name_label.bind(
             "<Button-1>",
             lambda event, i=index: self.on_open_student(self.class_record, i)
+        )
+
+        # New feature: Avg Total Score, sourced from the same
+        # per-photo total_score data that powers the Student
+        # DataFrame -- no second calculation.
+        avg_score = student.average_total_score
+        avg_text = "NaN" if math.isnan(avg_score) else f"{avg_score:g}"
+
+        ctk.CTkLabel(
+            row,
+            text=f"Avg Total: {avg_text}",
+            text_color="gray60",
+            width=140,
+            anchor="w"
+        ).pack(
+            side="left",
+            padx=(0, 10)
         )
 
         ctk.CTkLabel(
@@ -204,25 +226,66 @@ class ClassScreen:
 
         ctk.CTkButton(
             row,
-            text="+",
-            width=32,
+            text="📁+",
+            width=40,
             height=28,
             fg_color="transparent",
             hover_color="#123f2c",
             border_color="#2ECC71",
             border_width=1,
             text_color="#7CFFB2",
-            command=lambda i=index: self.handle_add_photos(i)
+            command=lambda i=index: self.handle_add_photos_folder(i)
+        ).pack(
+            side="right",
+            padx=(0, 8)
+        )
+
+        ctk.CTkButton(
+            row,
+            text="🖼+",
+            width=40,
+            height=28,
+            fg_color="transparent",
+            hover_color="#123f2c",
+            border_color="#2ECC71",
+            border_width=1,
+            text_color="#7CFFB2",
+            command=lambda i=index: self.handle_add_photos_files(i)
+        ).pack(
+            side="right",
+            padx=(0, 8)
+        )
+
+        ctk.CTkButton(
+            row,
+            text="Start Grading",
+            width=110,
+            height=28,
+            fg_color="transparent",
+            hover_color="#123f2c",
+            border_color="#2ECC71",
+            border_width=1,
+            text_color="#7CFFB2",
+            command=lambda i=index: self.handle_start_grading(i)
         ).pack(
             side="right",
             padx=(0, 8)
         )
 
     # -----------------------------------------
-    # ADD PHOTOS (spec section 14)
+    # START GRADING (new feature -- inactive for now: the student
+    # is added to the class, but running them through the Rule
+    # Engine / Teacher Grading review flow is a later feature)
     # -----------------------------------------
 
-    def handle_add_photos(self, index):
+    def handle_start_grading(self, index):
+        self.on_start_grading(self.class_record, index)
+
+    # -----------------------------------------
+    # ADD PHOTOS (spec section 14, extended with file selection)
+    # -----------------------------------------
+
+    def handle_add_photos_folder(self, index):
 
         folder_path = filedialog.askdirectory(
             title="Select a photo folder"
@@ -240,8 +303,30 @@ class ClassScreen:
         self.on_add_photos(
             self.class_record,
             index,
-            folder_path,
-            len(image_paths)
+            image_paths,
+            folder_path
+        )
+
+    def handle_add_photos_files(self, index):
+
+        file_paths = filedialog.askopenfilenames(
+            title="Select photo file(s)"
+        )
+
+        if not file_paths:
+            return
+
+        try:
+            image_paths = validate_selected_files(file_paths)
+        except FolderValidationError as error:
+            show_error(self.container, str(error))
+            return
+
+        self.on_add_photos(
+            self.class_record,
+            index,
+            image_paths,
+            None
         )
 
     # -----------------------------------------
@@ -259,7 +344,7 @@ class ClassScreen:
         )
 
     # -----------------------------------------
-    # ADD NEW STUDENT (spec section 12)
+    # ADD NEW STUDENT (spec section 12, extended with file selection)
     # -----------------------------------------
 
     def create_add_student_button(self):
@@ -279,7 +364,7 @@ class ClassScreen:
         dialog = ctk.CTkToplevel(self.container)
 
         dialog.title("Add New Student")
-        dialog.geometry("420x300")
+        dialog.geometry("440x360")
         dialog.resizable(False, False)
         dialog.grab_set()
 
@@ -313,7 +398,7 @@ class ClassScreen:
 
         ctk.CTkLabel(
             dialog,
-            text="Photo Folder",
+            text="Photos",
             anchor="w",
             font=ctk.CTkFont(size=13, weight="bold")
         ).pack(
@@ -321,11 +406,11 @@ class ClassScreen:
             padx=20
         )
 
-        selected_folder = {"path": None}
+        selected = {"image_paths": None, "folder_path": None}
 
-        folder_status_label = ctk.CTkLabel(
+        status_label = ctk.CTkLabel(
             dialog,
-            text="No folder selected",
+            text="No photos selected",
             text_color="gray60"
         )
 
@@ -338,25 +423,78 @@ class ClassScreen:
             if not folder_path:
                 return
 
-            selected_folder["path"] = folder_path
+            try:
+                image_paths = scan_student_folder(folder_path)
+            except FolderValidationError as error:
+                status_label.configure(
+                    text=f"⚠️ {error}",
+                    text_color="#FF6B6B"
+                )
+                return
 
-            folder_status_label.configure(
-                text=folder_path,
+            selected["image_paths"] = image_paths
+            selected["folder_path"] = folder_path
+
+            status_label.configure(
+                text=f"✅ {len(image_paths)} image(s) from folder",
                 text_color="#7CFFB2"
             )
 
-        ctk.CTkButton(
+        def select_files():
+
+            file_paths = filedialog.askopenfilenames(
+                title="Select photo file(s)"
+            )
+
+            if not file_paths:
+                return
+
+            try:
+                image_paths = validate_selected_files(file_paths)
+            except FolderValidationError as error:
+                status_label.configure(
+                    text=f"⚠️ {error}",
+                    text_color="#FF6B6B"
+                )
+                return
+
+            selected["image_paths"] = image_paths
+            selected["folder_path"] = None
+
+            status_label.configure(
+                text=f"✅ {len(image_paths)} image(s) selected",
+                text_color="#7CFFB2"
+            )
+
+        button_frame = ctk.CTkFrame(
             dialog,
-            text="Select Folder",
-            width=140,
-            command=select_folder
-        ).pack(
+            fg_color="transparent"
+        )
+
+        button_frame.pack(
             anchor="w",
             padx=20,
             pady=(5, 5)
         )
 
-        folder_status_label.pack(
+        ctk.CTkButton(
+            button_frame,
+            text="Select Folder",
+            width=130,
+            command=select_folder
+        ).pack(
+            side="left",
+            padx=(0, 10)
+        )
+
+        ctk.CTkButton(
+            button_frame,
+            text="Select Files",
+            width=130,
+            command=select_files
+        ).pack(side="left")
+
+        status_label.pack(
             anchor="w",
             padx=20,
             pady=(0, 10)
@@ -376,20 +514,14 @@ class ClassScreen:
         def handle_add():
 
             name = name_entry.get().strip()
-            folder_path = selected_folder["path"]
+            image_paths = selected["image_paths"]
 
             if not name:
                 error_label.configure(text="Please enter a student name.")
                 return
 
-            if not folder_path:
-                error_label.configure(text="Please select a photo folder.")
-                return
-
-            try:
-                image_paths = scan_student_folder(folder_path)
-            except FolderValidationError as error:
-                error_label.configure(text=str(error))
+            if not image_paths:
+                error_label.configure(text="Please select a photo folder or file(s).")
                 return
 
             dialog.destroy()
@@ -397,8 +529,8 @@ class ClassScreen:
             self.on_add_student(
                 self.class_record,
                 name,
-                folder_path,
-                len(image_paths)
+                image_paths,
+                selected["folder_path"]
             )
 
         button_row = ctk.CTkFrame(

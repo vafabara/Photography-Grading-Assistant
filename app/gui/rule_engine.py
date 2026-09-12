@@ -11,17 +11,22 @@ from ..core.rules import (
 
 class RuleEngineScreen:
     """
-    The 'Rule Engine' setup screen (spec section 1-3).
+    The 'Rule Engine' setup screen (spec sections 1-3).
 
     Lets the professor set a Minimum/Maximum range per metadata
     factor and choose how the total 100 points split between System
     and Human grading. Calls `on_continue(config)` with a
     RuleEngineConfig once the input validates.
+
+    Also offers a Skip option (new feature: Rule Engine Skip) for a
+    professor who wants to grade entirely manually -- calls
+    `on_skip()` directly, with no Rule Engine validation at all.
     """
 
-    def __init__(self, parent, on_continue, banner_text=None):
+    def __init__(self, parent, on_continue, on_skip=None, banner_text=None):
 
         self.on_continue = on_continue
+        self.on_skip = on_skip
         self.factor_entries = {}
 
         self.container = ctk.CTkFrame(
@@ -84,15 +89,7 @@ class RuleEngineScreen:
 
         self.error_label.pack(pady=(10, 5))
 
-        ctk.CTkButton(
-            self.container,
-            text="Continue",
-            width=150,
-            height=40,
-            fg_color="#1F8F4C",
-            hover_color="#27AE60",
-            command=self.handle_continue
-        ).pack(pady=(10, 0))
+        self.create_action_buttons()
 
     # -----------------------------------------
     # ROWS
@@ -204,6 +201,41 @@ class RuleEngineScreen:
                 text="Human Score: —"
             )
 
+    def create_action_buttons(self):
+
+        button_row = ctk.CTkFrame(
+            self.container,
+            fg_color="transparent"
+        )
+
+        button_row.pack(pady=(10, 0))
+
+        ctk.CTkButton(
+            button_row,
+            text="Continue",
+            width=150,
+            height=40,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
+            command=self.handle_continue
+        ).pack(
+            side="left",
+            padx=(0, 10)
+        )
+
+        ctk.CTkButton(
+            button_row,
+            text="Skip (Manual Grading Only)",
+            width=220,
+            height=40,
+            fg_color="transparent",
+            hover_color="#123f2c",
+            border_color="#2ECC71",
+            border_width=1,
+            text_color="#7CFFB2",
+            command=self.handle_skip
+        ).pack(side="left")
+
     # -----------------------------------------
     # VALIDATION / SUBMIT
     # -----------------------------------------
@@ -270,3 +302,14 @@ class RuleEngineScreen:
         )
 
         self.on_continue(config)
+
+    def handle_skip(self):
+        """
+        New feature: Rule Engine Skip. No validation at all -- the
+        professor is choosing to grade entirely manually, so
+        app.py.on_rules_skipped() sets every photo's Teacher max
+        score to 100 and leaves Rule Engine grading off.
+        """
+
+        if self.on_skip:
+            self.on_skip()

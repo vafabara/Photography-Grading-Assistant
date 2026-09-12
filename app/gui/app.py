@@ -10,8 +10,13 @@ from ..core.image import load_image
 from ..core.converters import exif_value
 from ..core.scoring import grade_student
 from ..core.student import ImageRecord
-from ..core.class_model import build_class_record, validate_new_student_name, ClassError, ClassStudentEntry
-from ..storage.recent_files import load_recent_files, add_recent_file
+from ..core.class_model import (
+    build_class_record,
+    validate_new_student_name,
+    ClassError,
+    ClassStudentEntry,
+    ClassPhotoEntry,
+)
 from ..storage.class_storage import save_class, load_all_classes, load_class, delete_class
 
 from .class_screen import ClassScreen
@@ -41,14 +46,13 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         # Current image
         self.current_image = None
         self.current_data = None
-        self.recent_map = {}
 
         # Class / student workflow
         self.class_name = None
         self.student_count = 0
         self.students = []
 
-        # Populated once folders are selected (student_setup.py):
+        # Populated once folders/files are selected (student_setup.py):
         # one core.student.Student per name, each with its own
         # core.student.ImageRecord list. image_records is the same
         # ImageRecords flattened into the single ordered sequence
@@ -56,6 +60,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.class_students = []
         self.image_records = []
         self.current_image_index = 0
+
+        # The persisted ClassRecord created for the class currently
+        # being reviewed (new feature: per-photo scores/notes are
+        # written back into this and saved as they're confirmed).
+        self.class_record = None
 
         # Rule Engine
         self.rule_config = None
@@ -84,17 +93,39 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         for widget in self.main_frame.winfo_children():
             widget.destroy()
 
+    def find_photo_entry(self, image_record):
+        """
+        Locate the core.class_model.ClassPhotoEntry that corresponds
+        to `image_record` inside self.class_record, by matching
+        image path (new feature: persisting per-photo scores/notes).
+        Returns None if there's no class currently being reviewed,
+        or no matching photo (e.g. Open Image / drag & drop outside
+        the review flow).
+        """
+
+        if self.class_record is None:
+            return None
+
+        target_path = str(image_record.image_path)
+
+        for student in self.class_record.students:
+            for photo in student.photos:
+                if photo.path == target_path:
+                    return photo
+
+        return None
+
     # -----------------------------------------
     # SETUP STEP 1 — HOME PAGE
     # -----------------------------------------
 
     def show_setup_count_screen(self):
         """
-        Home page: Welcome + Previous Classes (now backed by real,
-        persisted classes -- new feature: Class Management) + New
-        Class form. Kept under the original method name so nothing
-        else in the app has to change how it starts the setup flow
-        or returns to Home.
+        Home page: Welcome + Previous Classes (backed by real,
+        persisted classes -- Class Management) + New Class form.
+        Kept under the original method name so nothing else in the
+        app has to change how it starts the setup flow or returns to
+        Home.
         """
 
         self.clear_main_frame()
@@ -230,15 +261,15 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         ).pack(pady=(10, 0))
 
     # -----------------------------------------
-    # SETUP STEP 3 — SELECT FOLDER PER STUDENT
+    # SETUP STEP 3 — SELECT FOLDER/FILES PER STUDENT
     # -----------------------------------------
 
     def show_setup_photos_screen(self):
         """
         Kept under the original method name so nothing else in the
         app has to change how it continues the setup flow. Delegates
-        to StudentFoldersScreen (new feature: Select Image -> Select
-        Folder, multiple photos per student).
+        to StudentFoldersScreen (Select Folder or Select Files, one
+        or more photos per student).
         """
 
         self.clear_main_frame()
@@ -252,16 +283,16 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
     def on_folders_selected(self, class_students):
         """
         Called by StudentFoldersScreen once every student has a
-        valid, validated photo folder. `class_students` is a list of
+        valid photo selection. `class_students` is a list of
         core.student.Student, each already holding one ImageRecord
         per discovered photo.
 
         This is also the point where the Class actually gets created
-        and persisted (new feature: Class Management, spec section
-        3) -- Rule Engine is NOT a condition for the class to exist.
-        If two students ended up with the same name, that's caught
-        here and sent back to the names step rather than silently
-        saved.
+        and persisted (Class Management, spec section 3) -- Rule
+        Engine is NOT a condition for the class to exist. The
+        resulting ClassRecord is kept on self.class_record so later
+        Rule Engine / Teacher Grading confirmations and photo notes
+        can be written back into it and saved.
         """
 
         self.class_students = class_students
@@ -280,6 +311,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             return
 
         save_class(class_record)
+        self.class_record = class_record
 
         self.show_rule_engine_screen(
             banner_text=f'Class "{class_record.class_name}" created'
@@ -296,16 +328,16 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         RuleEngineScreen(
             self.main_frame,
             on_continue=self.on_rules_configured,
+            on_skip=self.on_rules_skipped,
             banner_text=banner_text
         )
 
     def on_rules_configured(self, config):
         """
         Applies the professor's System/Human score split to every
-        photo in the review queue (new feature: Teacher Grading).
-        The split itself always comes from `config` -- nothing here
-        hard-codes a specific weighting -- so 40/60, 30/70, etc. all
-        just work.
+        photo in the review queue. The split itself always comes
+        from `config` -- nothing here hard-codes a specific
+        weighting -- so 40/60, 30/70, etc. all just work.
         """
 
         self.rule_config = config
@@ -316,9 +348,25 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.start_review()
 
+    def on_rules_skipped(self):
+        """
+        New feature: Rule Engine Skip. The professor wants to grade
+        entirely manually -- no Rule Engine grading runs at all
+        (self.rule_config stays None, so load_and_display never
+        calls grade_student), and every photo's Teacher Grading max
+        becomes the full 100 points.
+        """
+
+        self.rule_config = None
+
+        for image_record in self.image_records:
+            image_record.teacher_max_score = 100
+
+        self.start_review()
+
     # -----------------------------------------
     # CLASS SCREEN / STUDENT DETAIL
-    # (new feature: Class Management, spec sections 8-16)
+    # (Class Management, spec sections 8-16)
     # -----------------------------------------
 
     def on_open_class(self, class_id):
@@ -356,7 +404,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             on_open_student=self.on_open_student,
             on_add_student=self.on_add_student_to_class,
             on_add_photos=self.on_add_photos_to_class,
-            on_delete_student=self.on_delete_student_from_class
+            on_delete_student=self.on_delete_student_from_class,
+            on_start_grading=self.on_start_grading
         )
 
     def on_delete_class(self, class_id):
@@ -382,12 +431,25 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             on_back=lambda: self.open_class_screen(class_record.class_id)
         )
 
-    def on_add_student_to_class(self, class_record, name, folder_path, photo_count):
+    def on_start_grading(self, class_record, student_index):
         """
-        Called by ClassScreen's Add New Student dialog once a folder
-        has already been picked and scanned. Validates the name is
-        non-blank and not a duplicate (spec section 20) before
-        persisting -- ClassScreen itself never writes storage.
+        New feature: "Start Grading" next to a student in the Class
+        Screen. Intentionally inactive for now -- routing a student
+        added to an already-saved class through the Rule Engine /
+        Teacher Grading review flow is a later feature (matches the
+        existing placeholder pattern used by on_teacher_confirm
+        before its export/lock logic existed).
+        """
+
+        pass
+
+    def on_add_student_to_class(self, class_record, name, image_paths, source_folder):
+        """
+        Called by ClassScreen's Add New Student dialog once photos
+        have already been picked and validated (folder or individual
+        files). Validates the name is non-blank and not a duplicate
+        (spec section 20) before persisting -- ClassScreen itself
+        never writes storage.
         """
 
         try:
@@ -399,30 +461,42 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         class_record.students.append(
             ClassStudentEntry(
                 name=name,
-                folder_path=folder_path,
-                photo_count=photo_count
+                folder_path=source_folder or "",
+                photo_count=len(image_paths),
+                photos=[
+                    ClassPhotoEntry(path=str(path)) for path in image_paths
+                ],
             )
         )
 
         save_class(class_record)
         self.open_class_screen(class_record.class_id)
 
-    def on_add_photos_to_class(self, class_record, student_index, folder_path, photo_count):
+    def on_add_photos_to_class(self, class_record, student_index, image_paths, source_folder):
         """
-        Called by ClassScreen after a new folder has been picked and
-        scanned for an existing student (spec section 14). Photo
-        counts only ever get *added to* -- selecting the exact same
-        folder again re-scans it instead of doubling the count, as a
-        simple guard against double counting (spec section 14).
+        Called by ClassScreen after new photos have been picked and
+        validated for an existing student (folder or individual
+        files, spec section 14). Selecting the exact same folder
+        again re-scans it instead of doubling the count/photos, as a
+        simple guard against double counting; individually-selected
+        files always add to the existing set.
         """
 
         student = class_record.students[student_index]
 
-        if folder_path == student.folder_path:
-            student.photo_count = photo_count
+        new_photos = [
+            ClassPhotoEntry(path=str(path)) for path in image_paths
+        ]
+
+        if source_folder is not None and source_folder == student.folder_path:
+            student.photo_count = len(image_paths)
+            student.photos = new_photos
         else:
-            student.photo_count += photo_count
-            student.folder_path = folder_path
+            student.photo_count += len(image_paths)
+            student.photos += new_photos
+
+            if source_folder is not None:
+                student.folder_path = source_folder
 
         save_class(class_record)
         self.open_class_screen(class_record.class_id)
@@ -454,7 +528,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.create_content()
         self.create_bottom_bar()
 
-        self.refresh_recent_menu()
         self.load_current_image()
 
     def create_student_bar(self):
@@ -577,7 +650,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.image_viewer = ImageViewer(
             self.content,
-            on_drop=self.on_drop
+            on_drop=self.on_drop,
+            on_note_save=self.on_note_save
         )
 
         self.metadata_panel = MetadataPanel(
@@ -592,15 +666,44 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
     def on_teacher_confirm(self, image_record):
         """
         Called by TeacherGradingPanel once a Teacher Grading score is
-        confirmed for the photo on screen. The ImageRecord already
-        carries teacher_score/total_score at this point -- nothing
-        else needs to happen yet. Placeholder hook for the next
-        stage (Student Average / DataFrame / Final Results), the
-        same way HomeScreen.handle_delete_class is a placeholder
-        until real storage exists.
+        confirmed for the photo on screen. Writes the confirmed
+        Rule Engine / Teacher / Total scores back into the matching
+        core.class_model.ClassPhotoEntry and persists them, so the
+        Class Screen's Avg Total and the Student DataFrame both pick
+        them up.
         """
 
-        pass
+        photo_entry = self.find_photo_entry(image_record)
+
+        if photo_entry is None:
+            return
+
+        photo_entry.rule_engine_score = image_record.rule_engine_score
+        photo_entry.teacher_score = image_record.teacher_score
+        photo_entry.total_score = image_record.total_score
+
+        save_class(self.class_record)
+
+    # -----------------------------------------
+    # PHOTO NOTES (new feature)
+    # -----------------------------------------
+
+    def on_note_save(self, image_record, note_text):
+        """
+        Called by ImageViewer once the professor saves a note for
+        the photo on screen. Persists it into the matching
+        core.class_model.ClassPhotoEntry.note -- notes are stored
+        per photo, not per student.
+        """
+
+        photo_entry = self.find_photo_entry(image_record)
+
+        if photo_entry is None:
+            return
+
+        photo_entry.note = note_text
+
+        save_class(self.class_record)
 
     # -----------------------------------------
     # BOTTOM BAR
@@ -649,18 +752,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
         self.copy_button.pack(
-            side="left",
-            padx=(10, 0)
-        )
-
-        self.recent_menu = ctk.CTkOptionMenu(
-            self.bottom_frame,
-            values=["No recent files"],
-            command=self.open_recent,
-            width=220
-        )
-
-        self.recent_menu.pack(
             side="left",
             padx=(10, 0)
         )
@@ -733,14 +824,14 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         Loads `file_path` and renders it. `image_record` is the
         core.student.ImageRecord this photo belongs to during the
         official review flow (student/photo already known, Teacher
-        Grading state preserved across re-renders).
+        Grading state and note preserved across re-renders).
 
-        When called without one -- Open Image, drag & drop, or
-        Recent Files, all of which can point at any photo outside
-        the review queue -- a scratch ImageRecord is created just so
-        MetadataPanel / Teacher Grading has something to render. It
-        isn't added to self.image_records, so it never affects the
-        Next button or the official per-student results.
+        When called without one -- Open Image or drag & drop, both
+        of which can point at any photo outside the review queue --
+        a scratch ImageRecord is created just so MetadataPanel /
+        Teacher Grading has something to render. It isn't added to
+        self.image_records, so it never affects the Next button or
+        the official per-student results.
         """
 
         try:
@@ -775,13 +866,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 image_record.teacher_max_score = self.rule_config.human_score
 
             self.image_viewer.update(
-                self.current_image
+                self.current_image,
+                image_record
             )
 
             self.metadata_panel.update(data, image_record)
-
-            add_recent_file(data["path"])
-            self.refresh_recent_menu()
 
         except FileNotFoundError:
 
@@ -803,37 +892,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 self,
                 "Could not open this file."
             )
-
-    # -----------------------------------------
-    # RECENT FILES
-    # -----------------------------------------
-
-    def refresh_recent_menu(self):
-
-        recent = load_recent_files()
-
-        self.recent_map = {
-            Path(path).name: path
-            for path in recent
-        }
-
-        values = (
-            list(self.recent_map.keys())
-            or ["No recent files"]
-        )
-
-        self.recent_menu.configure(
-            values=values
-        )
-
-        self.recent_menu.set(values[0])
-
-    def open_recent(self, name):
-
-        file_path = self.recent_map.get(name)
-
-        if file_path:
-            self.load_and_display(file_path)
 
     # -----------------------------------------
     # COPY INFO
