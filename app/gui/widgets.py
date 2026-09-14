@@ -46,6 +46,38 @@ def show_error(parent, message):
     button.pack()
 
 
+def show_info(parent, title, message):
+    """
+    Simple informational popup (new feature: Class Results page --
+    Export "Coming Soon"). Same layout as show_error, but with a
+    caller-provided title since this isn't necessarily an error.
+    """
+
+    info_window = ctk.CTkToplevel(parent)
+
+    info_window.title(title)
+    info_window.geometry("400x180")
+    info_window.resizable(False, False)
+
+    label = ctk.CTkLabel(
+        info_window,
+        text=message,
+        font=ctk.CTkFont(size=15),
+        wraplength=340
+    )
+
+    label.pack(pady=(35, 20))
+
+    button = ctk.CTkButton(
+        info_window,
+        text="OK",
+        width=100,
+        command=info_window.destroy
+    )
+
+    button.pack()
+
+
 def show_confirm(parent, message, on_yes):
     """
     Modal Yes/No confirmation dialog (new feature: Delete Class /

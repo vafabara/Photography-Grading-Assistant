@@ -95,6 +95,20 @@ class ClassStudentEntry:
 
         return round(sum(scores) / len(scores), 1)
 
+    @property
+    def is_completed(self):
+        """
+        True once every one of this student's photos has a Total
+        Score (new feature: Class Results page). Reads the exact
+        same `total_score` values as average_total_score -- not a
+        second calculation. A student with no photos yet is never
+        considered completed.
+        """
+
+        return bool(self.photos) and all(
+            photo.total_score is not None for photo in self.photos
+        )
+
 
 @dataclass
 class ClassRecord:
@@ -115,6 +129,20 @@ class ClassRecord:
     @property
     def total_photo_count(self):
         return sum(student.photo_count for student in self.students)
+
+    @property
+    def completed_student_count(self):
+        """
+        Number of students whose every photo has a Total Score
+        (new feature: Class Results page). Sourced from
+        ClassStudentEntry.is_completed -- not a second calculation.
+        """
+
+        return sum(1 for student in self.students if student.is_completed)
+
+    @property
+    def pending_student_count(self):
+        return self.student_count - self.completed_student_count
 
     def to_dict(self):
         return {

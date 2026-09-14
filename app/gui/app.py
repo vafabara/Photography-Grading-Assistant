@@ -23,6 +23,7 @@ from .class_screen import ClassScreen
 from .home_screen import HomeScreen
 from .image_viewer import ImageViewer
 from .metadata_panel import MetadataPanel
+from .results_screen import ClassResultsScreen
 from .rule_engine import RuleEngineScreen
 from .student_detail import StudentDetailScreen
 from .student_setup import StudentFoldersScreen
@@ -575,23 +576,34 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.current_image_index += 1
 
         if self.current_image_index >= len(self.image_records):
-            self.show_done_screen()
+            self.show_results_screen()
         else:
             self.load_current_image()
 
-    def show_done_screen(self):
+    def show_results_screen(self):
+        """
+        New feature: Class Results page, replacing the old "Done"
+        screen. Reloads the ClassRecord fresh from storage -- same
+        pattern as open_class_screen -- so the page reflects exactly
+        what's persisted, even though self.class_record has already
+        been kept up to date via on_teacher_confirm/on_note_save.
+        Falls back to the in-memory copy if the reload fails for any
+        reason, since it's still the most accurate data we have.
+        """
 
         self.clear_main_frame()
 
-        ctk.CTkLabel(
+        class_record = load_class(self.class_record.class_id)
+
+        if class_record is not None:
+            self.class_record = class_record
+
+        ClassResultsScreen(
             self.main_frame,
-            text="Done",
-            font=ctk.CTkFont(
-                size=32,
-                weight="bold"
-            ),
-            text_color="#7CFFB2"
-        ).pack(expand=True)
+            class_record=self.class_record,
+            on_home=self.show_setup_count_screen,
+            on_review=self.start_review
+        )
 
     # -----------------------------------------
     # HEADER
