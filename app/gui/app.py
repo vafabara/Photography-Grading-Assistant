@@ -10,14 +10,17 @@ from ..core.image import load_image
 from ..core.converters import exif_value
 from ..core.scoring import grade_student
 from ..core.student import ImageRecord
+from ..core.rules import RuleEngineConfig
 from ..core.class_model import (
     build_class_record,
     validate_new_student_name,
+    image_records_from_student,
     ClassError,
     ClassStudentEntry,
     ClassPhotoEntry,
 )
 from ..storage.class_storage import save_class, load_all_classes, load_class, delete_class
+from ..storage.rule_presets import load_presets, save_preset
 
 from .class_screen import ClassScreen
 from .home_screen import HomeScreen
@@ -315,6 +318,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.class_record = class_record
 
         self.show_rule_engine_screen(
+            on_continue=self.on_rules_configured,
+            on_skip=self.on_rules_skipped,
             banner_text=f'Class "{class_record.class_name}" created'
         )
 
@@ -322,14 +327,38 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
     # RULE ENGINE
     # -----------------------------------------
 
-    def show_rule_engine_screen(self, banner_text=None):
+    def show_rule_engine_screen(self, on_continue, on_skip, banner_text=None):
+        """
+        `on_continue`/`on_skip` are supplied by the caller rather
+        than hard-coded so this one screen can serve two different
+        flows without a second Rule Engine implementation: the
+        initial class-creation flow (on_rules_configured /
+        on_rules_skipped below) and "Start Grading" on a class that
+        was never configured (on_start_grading), which needs to
+        route back into grading a specific student afterward instead
+        of the usual full-queue review.
+
+        New feature: Rule Engine Presets. Presets are loaded fresh
+        from storage every time this screen opens. Saving a new
+        preset re-opens this same screen (with the same
+        on_continue/on_skip/banner_text it was already showing) so
+        the preset list reflects the save immediately.
+        """
 
         self.clear_main_frame()
 
+        presets = load_presets()
+
+        def handle_save_preset(name, config):
+            save_preset(name, config)
+            self.show_rule_engine_screen(on_continue, on_skip, banner_text)
+
         RuleEngineScreen(
             self.main_frame,
-            on_continue=self.on_rules_configured,
-            on_skip=self.on_rules_skipped,
+            on_continue=on_continue,
+            on_skip=on_skip,
+            on_save_preset=handle_save_preset,
+            presets=presets,
             banner_text=banner_text
         )
 
@@ -339,6 +368,12 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         photo in the review queue. The split itself always comes
         from `config` -- nothing here hard-codes a specific
         weighting -- so 40/60, 30/70, etc. all just work.
+
+        Also persists `config` onto self.class_record (new feature:
+        class's active Rule Engine configuration) so reopening this
+        class later -- to grade a student added afterward, or after
+        an app restart -- knows which configuration to reuse instead
+        of asking the professor to reconfigure from scratch.
         """
 
         self.rule_config = config
@@ -346,6 +381,10 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         for image_record in self.image_records:
             image_record.rule_engine_max_score = config.system_score
             image_record.teacher_max_score = config.human_score
+
+        if self.class_record is not None:
+            self.class_record.rule_config = config.to_dict()
+            save_class(self.class_record)
 
         self.start_review()
 
@@ -356,12 +395,22 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         (self.rule_config stays None, so load_and_display never
         calls grade_student), and every photo's Teacher Grading max
         becomes the full 100 points.
+
+        Persisted as {"skipped": True} rather than a real
+        RuleEngineConfig, since "no Rule Engine at all" isn't a
+        config with zero rules -- it's a distinct choice that
+        reopening this class must also remember and repeat, not
+        re-ask for.
         """
 
         self.rule_config = None
 
         for image_record in self.image_records:
             image_record.teacher_max_score = 100
+
+        if self.class_record is not None:
+            self.class_record.rule_config = {"skipped": True}
+            save_class(self.class_record)
 
         self.start_review()
 
@@ -434,15 +483,89 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def on_start_grading(self, class_record, student_index):
         """
-        New feature: "Start Grading" next to a student in the Class
-        Screen. Intentionally inactive for now -- routing a student
-        added to an already-saved class through the Rule Engine /
-        Teacher Grading review flow is a later feature (matches the
-        existing placeholder pattern used by on_teacher_confirm
-        before its export/lock logic existed).
+        "Start Grading" next to a student in the Class Screen (new
+        feature). Routes that student's already-persisted photos
+        into the existing Rule Engine / Teacher Grading review flow
+        via begin_grading()/begin_grading_skipped() below --
+        reusing this class's already-saved rule_config if there is
+        one, or asking the professor to configure/skip the Rule
+        Engine first (the exact same RuleEngineScreen used for a
+        brand-new class) if this class has never been configured,
+        including every class saved before rule_config existed.
         """
 
-        pass
+        self.class_record = class_record
+
+        rule_config_data = class_record.rule_config
+
+        if rule_config_data is None:
+            self.show_rule_engine_screen(
+                on_continue=lambda config: self.begin_grading(
+                    class_record, student_index, config
+                ),
+                on_skip=lambda: self.begin_grading_skipped(
+                    class_record, student_index
+                ),
+            )
+            return
+
+        if rule_config_data.get("skipped"):
+            self.begin_grading_skipped(class_record, student_index)
+            return
+
+        config = RuleEngineConfig.from_dict(rule_config_data)
+        self.begin_grading(class_record, student_index, config)
+
+    def begin_grading(self, class_record, student_index, config):
+        """
+        Shared by on_start_grading (class already has a rule_config)
+        and the Rule Engine screen's Continue button when a class
+        had none yet. Persists `config` onto the class, rebuilds the
+        runtime ImageRecords for this one student straight from
+        their persisted ClassPhotoEntry data
+        (core.class_model.image_records_from_student -- previously
+        confirmed scores/notes come along with them), and hands them
+        to the existing start_review() flow exactly the way a brand
+        new class's photos already are.
+        """
+
+        class_record.rule_config = config.to_dict()
+        save_class(class_record)
+
+        student_entry = class_record.students[student_index]
+        image_records = image_records_from_student(student_entry)
+
+        for image_record in image_records:
+            image_record.rule_engine_max_score = config.system_score
+            image_record.teacher_max_score = config.human_score
+
+        self.rule_config = config
+        self.image_records = image_records
+
+        self.start_review()
+
+    def begin_grading_skipped(self, class_record, student_index):
+        """
+        Shared by on_start_grading (class was already configured to
+        Skip) and the Rule Engine screen's Skip button when a class
+        had no configuration yet. Same as begin_grading() above but
+        for manual-only grading -- see on_rules_skipped for why this
+        is stored as {"skipped": True} rather than a RuleEngineConfig.
+        """
+
+        class_record.rule_config = {"skipped": True}
+        save_class(class_record)
+
+        student_entry = class_record.students[student_index]
+        image_records = image_records_from_student(student_entry)
+
+        for image_record in image_records:
+            image_record.teacher_max_score = 100
+
+        self.rule_config = None
+        self.image_records = image_records
+
+        self.start_review()
 
     def on_add_student_to_class(self, class_record, name, image_paths, source_folder):
         """

@@ -1,0 +1,54 @@
+{
+  "preset 1": {
+    "system_score": 40,
+    "human_score": 60,
+    "rules": [
+      {
+        "factor": "iso",
+        "minimum": 200.0,
+        "maximum": 600.0
+      },
+      {
+        "factor": "aperture",
+        "minimum": 2.0,
+        "maximum": 4.5
+      },
+      {
+        "factor": "shutter_speed",
+        "minimum": 0.001,
+        "maximum": 0.1
+      },
+      {
+        "factor": "focal_length",
+        "minimum": 1.0,
+        "maximum": 10.0
+      }
+    ]
+  },
+  "preset 2": {
+    "system_score": 40,
+    "human_score": 60,
+    "rules": [
+      {
+        "factor": "iso",
+        "minimum": 400.0,
+        "maximum": 600.0
+      },
+      {
+        "factor": "aperture",
+        "minimum": 2.0,
+        "maximum": 4.5
+      },
+      {
+        "factor": "shutter_speed",
+        "minimum": 0.001,
+        "maximum": 0.1
+      },
+      {
+        "factor": "focal_length",
+        "minimum": 1.0,
+        "maximum": 10.0
+      }
+    ]
+  }
+}

@@ -140,6 +140,92 @@ def show_confirm(parent, message, on_yes):
     )
 
 
+def show_prompt(parent, title, label_text, on_submit):
+    """
+    Small popup that asks for one line of text (new feature: Rule
+    Engine Presets -- naming a preset before saving it). Same
+    Toplevel/grab_set/button-row shape as show_confirm and
+    show_note_dialog. Calls `on_submit(text)` only if the professor
+    presses Save with a non-blank value; Cancel/closing the dialog
+    does nothing.
+    """
+
+    prompt_window = ctk.CTkToplevel(parent)
+
+    prompt_window.title(title)
+    prompt_window.geometry("380x200")
+    prompt_window.resizable(False, False)
+    prompt_window.grab_set()
+
+    ctk.CTkLabel(
+        prompt_window,
+        text=label_text,
+        font=ctk.CTkFont(size=14, weight="bold"),
+        wraplength=320
+    ).pack(pady=(25, 10), padx=20)
+
+    entry = ctk.CTkEntry(prompt_window)
+
+    entry.pack(
+        fill="x",
+        padx=20,
+        pady=(0, 10)
+    )
+
+    error_label = ctk.CTkLabel(
+        prompt_window,
+        text="",
+        text_color="#FF6B6B"
+    )
+
+    error_label.pack(pady=(0, 5))
+
+    def handle_save():
+
+        text = entry.get().strip()
+
+        if not text:
+            error_label.configure(text="Please enter a name.")
+            return
+
+        prompt_window.destroy()
+        on_submit(text)
+
+    button_row = ctk.CTkFrame(
+        prompt_window,
+        fg_color="transparent"
+    )
+
+    button_row.pack(pady=(5, 15))
+
+    ctk.CTkButton(
+        button_row,
+        text="Save",
+        width=100,
+        fg_color="#1F8F4C",
+        hover_color="#27AE60",
+        command=handle_save
+    ).pack(
+        side="left",
+        padx=10
+    )
+
+    ctk.CTkButton(
+        button_row,
+        text="Cancel",
+        width=100,
+        fg_color="transparent",
+        hover_color="#3a1f1f",
+        border_color="#FF6B6B",
+        border_width=1,
+        text_color="#FF6B6B",
+        command=prompt_window.destroy
+    ).pack(
+        side="left",
+        padx=10
+    )
+
+
 def show_note_dialog(parent, initial_text, on_save):
     """
     Small popup for adding/editing a single photo's note (new

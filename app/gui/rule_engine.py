@@ -7,6 +7,7 @@ from ..core.rules import (
     build_rule,
     validate_score_split,
 )
+from .widgets import show_prompt
 
 
 class RuleEngineScreen:
@@ -21,12 +22,31 @@ class RuleEngineScreen:
     Also offers a Skip option (new feature: Rule Engine Skip) for a
     professor who wants to grade entirely manually -- calls
     `on_skip()` directly, with no Rule Engine validation at all.
+
+    New feature: Rule Engine Presets. `presets` is a
+    {name: RuleEngineConfig} dict the caller already loaded from
+    storage.rule_presets -- this screen only renders it and lets the
+    professor load one into the form above. Saving a new preset
+    reuses the exact same validation as Continue (via build_config())
+    and calls `on_save_preset(name, config)`; persisting it and
+    refreshing the list is the caller's job (same "screen renders,
+    App persists" split used everywhere else in the app).
     """
 
-    def __init__(self, parent, on_continue, on_skip=None, banner_text=None):
+    def __init__(
+        self,
+        parent,
+        on_continue,
+        on_skip=None,
+        on_save_preset=None,
+        presets=None,
+        banner_text=None,
+    ):
 
         self.on_continue = on_continue
         self.on_skip = on_skip
+        self.on_save_preset = on_save_preset
+        self.presets = presets or {}
         self.factor_entries = {}
 
         self.container = ctk.CTkFrame(
@@ -90,6 +110,7 @@ class RuleEngineScreen:
         self.error_label.pack(pady=(10, 5))
 
         self.create_action_buttons()
+        self.create_presets_section()
 
     # -----------------------------------------
     # ROWS
@@ -237,12 +258,153 @@ class RuleEngineScreen:
         ).pack(side="left")
 
     # -----------------------------------------
+    # SAVED PRESETS (new feature: Rule Engine Presets)
+    # -----------------------------------------
+
+    def create_presets_section(self):
+
+        ctk.CTkFrame(
+            self.container,
+            height=2,
+            fg_color="gray30"
+        ).pack(
+            fill="x",
+            pady=(20, 15)
+        )
+
+        ctk.CTkLabel(
+            self.container,
+            text="Saved Presets",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#7CFFB2"
+        ).pack(
+            anchor="w",
+            pady=(0, 10)
+        )
+
+        row = ctk.CTkFrame(
+            self.container,
+            fg_color="transparent"
+        )
+
+        row.pack(fill="x")
+
+        preset_names = list(self.presets.keys())
+
+        self.preset_menu = ctk.CTkOptionMenu(
+            row,
+            values=preset_names or ["No saved presets"],
+            width=220
+        )
+
+        self.preset_menu.pack(
+            side="left",
+            padx=(0, 10)
+        )
+
+        if not preset_names:
+            self.preset_menu.configure(state="disabled")
+
+        ctk.CTkButton(
+            row,
+            text="Load Selected Preset",
+            width=170,
+            fg_color="transparent",
+            hover_color="#123f2c",
+            border_color="#2ECC71",
+            border_width=1,
+            text_color="#7CFFB2",
+            command=self.handle_load_preset
+        ).pack(
+            side="left",
+            padx=(0, 10)
+        )
+
+        ctk.CTkButton(
+            row,
+            text="Save Preset",
+            width=140,
+            fg_color="#1F8F4C",
+            hover_color="#27AE60",
+            command=self.handle_save_preset
+        ).pack(side="left")
+
+    def handle_load_preset(self):
+        """
+        Loads the selected preset straight into the existing
+        Minimum/Maximum/System Score fields -- the professor can
+        still edit anything after loading it, same as if they'd
+        typed it in by hand.
+        """
+
+        self.error_label.configure(text="")
+
+        if not self.presets:
+            return
+
+        config = self.presets.get(self.preset_menu.get())
+
+        if config is None:
+            return
+
+        rules_by_factor = {rule.factor: rule for rule in config.rules}
+
+        for factor, (min_entry, max_entry) in self.factor_entries.items():
+
+            min_entry.delete(0, "end")
+            max_entry.delete(0, "end")
+
+            rule = rules_by_factor.get(factor)
+
+            if rule:
+                min_entry.insert(0, f"{rule.minimum:g}")
+                max_entry.insert(0, f"{rule.maximum:g}")
+
+        self.system_score_entry.delete(0, "end")
+        self.system_score_entry.insert(0, f"{config.system_score:g}")
+
+        self.update_human_score_preview()
+
+    def handle_save_preset(self):
+        """
+        Validates the current form with the exact same rules as
+        Continue (build_config()) before asking for a preset name --
+        a saved preset should never contain something the Rule
+        Engine itself wouldn't accept.
+        """
+
+        self.error_label.configure(text="")
+
+        config, error = self.build_config()
+
+        if error:
+            self.error_label.configure(text=error)
+            return
+
+        if not self.on_save_preset:
+            return
+
+        show_prompt(
+            self.container,
+            "Save Preset",
+            "Preset name:",
+            on_submit=lambda name: self.on_save_preset(name, config)
+        )
+
+    # -----------------------------------------
     # VALIDATION / SUBMIT
     # -----------------------------------------
 
-    def handle_continue(self):
+    def build_config(self):
+        """
+        Validate the on-screen fields and build a RuleEngineConfig
+        from them. The single place that turns form input into a
+        RuleEngineConfig -- both Continue and Save Preset call this
+        instead of each re-validating the same fields.
 
-        self.error_label.configure(text="")
+        Returns (config, None) on success, or (None, error_message)
+        if the form is invalid.
+        """
 
         rules = []
 
@@ -255,36 +417,26 @@ class RuleEngineScreen:
                 continue
 
             if not min_text or not max_text:
-                self.error_label.configure(
-                    text=(
-                        f"{FACTORS[factor]['label']}: fill in both "
-                        f"Minimum and Maximum, or leave both blank."
-                    )
+                return None, (
+                    f"{FACTORS[factor]['label']}: fill in both "
+                    f"Minimum and Maximum, or leave both blank."
                 )
-                return
 
             try:
                 minimum = float(min_text)
                 maximum = float(max_text)
             except ValueError:
-                self.error_label.configure(
-                    text=f"{FACTORS[factor]['label']}: values must be numbers."
-                )
-                return
+                return None, f"{FACTORS[factor]['label']}: values must be numbers."
 
             try:
                 rules.append(build_rule(factor, minimum, maximum))
             except RuleError as error:
-                self.error_label.configure(text=str(error))
-                return
+                return None, str(error)
 
         system_text = self.system_score_entry.get().strip()
 
         if not system_text.isdigit():
-            self.error_label.configure(
-                text="System Score must be a whole number between 0 and 100."
-            )
-            return
+            return None, "System Score must be a whole number between 0 and 100."
 
         system_score = int(system_text)
         human_score = 100 - system_score
@@ -292,14 +444,25 @@ class RuleEngineScreen:
         try:
             validate_score_split(system_score, human_score)
         except RuleError as error:
-            self.error_label.configure(text=str(error))
-            return
+            return None, str(error)
 
         config = RuleEngineConfig(
             system_score=system_score,
             human_score=human_score,
             rules=rules,
         )
+
+        return config, None
+
+    def handle_continue(self):
+
+        self.error_label.configure(text="")
+
+        config, error = self.build_config()
+
+        if error:
+            self.error_label.configure(text=error)
+            return
 
         self.on_continue(config)
 

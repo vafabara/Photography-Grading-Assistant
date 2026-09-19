@@ -23,6 +23,9 @@ core/rules.py and core/scoring.py.
 
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from .student import ImageRecord
 
 
 class ClassError(ValueError):
@@ -122,6 +125,20 @@ class ClassRecord:
     class_name: str
     students: list = field(default_factory=list)  # list[ClassStudentEntry]
 
+    # The RuleEngineConfig this class was actually graded with, as a
+    # plain dict (core.rules.RuleEngineConfig.to_dict()) -- new
+    # feature: reopening a class for grading needs to know which
+    # configuration to reuse. None means "never configured yet"
+    # (including every class saved before this field existed --
+    # spec: must load safely as None, not crash). The professor
+    # choosing "Skip" is stored as {"skipped": True} rather than a
+    # real config, since Skip means no Rule Engine grading at all.
+    #
+    # Deliberately the *actual* configuration, not just a preset
+    # name -- storage.rule_presets entries can be renamed/deleted
+    # later without changing what an already-graded class remembers.
+    rule_config: dict | None = None
+
     @property
     def student_count(self):
         return len(self.students)
@@ -149,6 +166,7 @@ class ClassRecord:
             "class_id": self.class_id,
             "class_name": self.class_name,
             "student_count": self.student_count,
+            "rule_config": self.rule_config,
             "students": [
                 {
                     "name": student.name,
@@ -181,6 +199,10 @@ class ClassRecord:
         return cls(
             class_id=data["class_id"],
             class_name=data["class_name"],
+            # .get() -- old saved classes never had this key, and
+            # must still load with rule_config=None rather than
+            # raising KeyError (spec: backward compatibility).
+            rule_config=data.get("rule_config"),
             students=students,
         )
 
@@ -256,3 +278,32 @@ def validate_new_student_name(class_record, name):
         raise ClassError(f'A student named "{name}" already exists in this class.')
 
     return name
+
+
+def image_records_from_student(student_entry):
+    """
+    Rebuild the runtime core.student.ImageRecord objects for one
+    persisted ClassStudentEntry -- the missing bridge between saved
+    class data and the existing Rule Engine / Teacher Grading review
+    flow (new feature: "Start Grading" / reopening a class).
+
+    Each photo's already-confirmed Rule Engine / Teacher / Total
+    score and note are restored straight from its ClassPhotoEntry,
+    so re-entering the review flow never loses previously-graded
+    work. EXIF/technical metadata isn't restored here -- it's
+    re-read from disk the same way it already is for any photo the
+    review flow displays (core.image.load_image, called from
+    gui/app.py.load_and_display), so there's nothing to duplicate.
+    """
+
+    return [
+        ImageRecord(
+            student_name=student_entry.name,
+            image_path=Path(photo.path),
+            rule_engine_score=photo.rule_engine_score,
+            teacher_score=photo.teacher_score,
+            total_score=photo.total_score,
+            note=photo.note,
+        )
+        for photo in student_entry.photos
+    ]

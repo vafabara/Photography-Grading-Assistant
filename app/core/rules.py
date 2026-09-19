@@ -59,12 +59,50 @@ class Rule:
     minimum: float
     maximum: float
 
+    def to_dict(self):
+        return {
+            "factor": self.factor,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            factor=data["factor"],
+            minimum=data["minimum"],
+            maximum=data["maximum"],
+        )
+
 
 @dataclass
 class RuleEngineConfig:
+    """
+    to_dict()/from_dict() here are the single place a RuleEngineConfig
+    is turned into/out of JSON -- both Rule Engine Presets
+    (storage.rule_presets) and a class's own persisted configuration
+    (ClassRecord.rule_config) reuse these instead of each having
+    their own serialization.
+    """
+
     system_score: float
     human_score: float
     rules: list = field(default_factory=list)
+
+    def to_dict(self):
+        return {
+            "system_score": self.system_score,
+            "human_score": self.human_score,
+            "rules": [rule.to_dict() for rule in self.rules],
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            system_score=data["system_score"],
+            human_score=data["human_score"],
+            rules=[Rule.from_dict(rule_data) for rule_data in data.get("rules", [])],
+        )
 
 
 # -----------------------------------------
