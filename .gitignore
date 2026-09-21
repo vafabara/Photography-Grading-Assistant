@@ -7,3 +7,4 @@ venv/
 .vscode/
 recent_files.json
 classes/
+rule_presets.json
