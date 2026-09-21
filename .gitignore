@@ -5,6 +5,5 @@ venv/
 .venv/
 .idea/
 .vscode/
-recent_files.json
 classes/
 rule_presets.json

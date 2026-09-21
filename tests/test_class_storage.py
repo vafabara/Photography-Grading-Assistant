@@ -301,3 +301,55 @@ class TestAverageAndCompletionProperties:
 
         assert record.completed_student_count == 0
         assert record.pending_student_count == 2
+
+
+class TestClassCompletionStateTransitions:
+    """
+    core.class_model has no ClassRecord.is_completed property --
+    class-level completion is actually tracked through
+    ClassRecord.completed_student_count / pending_student_count,
+    which are themselves built directly from each
+    ClassStudentEntry.is_completed (see class_model.py). This test
+    follows that actual mechanism -- protecting the same completion
+    signal the Results flow reads -- rather than assuming a
+    ClassRecord.is_completed that doesn't exist.
+    """
+
+    def test_completion_transitions_as_photos_get_graded_and_added(self):
+
+        record = ClassRecord(
+            class_id="class-1",
+            class_name="Photography 101",
+            students=[
+                ClassStudentEntry(
+                    name="Alice",
+                    folder_path="/photos/alice",
+                    photo_count=1,
+                    photos=[ClassPhotoEntry(path="/photos/alice/1.jpg")],
+                ),
+            ],
+        )
+
+        # 1. Ungraded photo -> the class is not completed yet.
+        assert record.students[0].is_completed is False
+        assert record.completed_student_count == 0
+        assert record.pending_student_count == 1
+
+        # 2. Give that photo a Total Score -> the student, and
+        #    therefore the whole class, becomes completed. Only
+        #    total_score is required -- is_completed doesn't check
+        #    rule_engine_score/teacher_score individually.
+        record.students[0].photos[0].total_score = 88.0
+
+        assert record.students[0].is_completed is True
+        assert record.completed_student_count == 1
+        assert record.pending_student_count == 0
+
+        # 3. Add another, still-ungraded photo for the same student
+        #    (e.g. the professor adds more photos later) -> that
+        #    student, and the class, become incomplete again.
+        record.students[0].photos.append(ClassPhotoEntry(path="/photos/alice/2.jpg"))
+
+        assert record.students[0].is_completed is False
+        assert record.completed_student_count == 0
+        assert record.pending_student_count == 1

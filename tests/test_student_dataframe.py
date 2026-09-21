@@ -137,3 +137,69 @@ class TestAverageRow:
         average_row = df.iloc[-1]
 
         assert average_row["Total Score"] == 85.0
+
+
+class TestMultipleStudentsInAClass:
+    """
+    build_student_dataframe only ever builds a table for one
+    ClassStudentEntry at a time (that's the real, current API --
+    there's no class-wide/multi-student DataFrame function in
+    student_dataframe.py, and gui/student_detail.py calls it the
+    same way, once per student). So "multiple students" coverage
+    means calling the real function once per student inside the
+    same class and proving their results stay independent.
+    """
+
+    def test_each_students_dataframe_stays_isolated_from_the_others(self):
+
+        alice = ClassStudentEntry(
+            name="Alice",
+            folder_path="/photos/alice",
+            photo_count=2,
+            photos=[
+                ClassPhotoEntry(path="/photos/alice/1.jpg", rule_engine_score=30.0, teacher_score=50.0, total_score=80.0),
+                ClassPhotoEntry(path="/photos/alice/2.jpg"),  # ungraded
+            ],
+        )
+
+        bob = ClassStudentEntry(
+            name="Bob",
+            folder_path="/photos/bob",
+            photo_count=1,
+            photos=[
+                ClassPhotoEntry(path="/photos/bob/1.jpg", rule_engine_score=40.0, teacher_score=55.0, total_score=95.0),
+            ],
+        )
+
+        alice_df = build_student_dataframe(alice)
+        bob_df = build_student_dataframe(bob)
+
+        # Every photo appears exactly once, under the student it
+        # actually belongs to -- Alice's table never contains Bob's
+        # photo (and vice versa), i.e. they're never mixed together.
+        assert len(alice_df) == 3   # 2 photos + Average
+        assert len(bob_df) == 2     # 1 photo + Average
+
+        alice_photo_rows = alice_df.iloc[:-1]
+        bob_photo_rows = bob_df.iloc[:-1]
+
+        assert list(alice_photo_rows["Photo"]) == ["Pic 1", "Pic 2"]
+        assert list(bob_photo_rows["Photo"]) == ["Pic 1"]
+
+        # Bob's single (fully scored) photo/value never leaks into
+        # Alice's rows, and Alice's values never leak into Bob's.
+        assert 95.0 not in list(alice_photo_rows["Total Score"].dropna())
+        assert 80.0 not in list(bob_photo_rows["Total Score"].dropna())
+
+        # Each student's Average is computed purely from that
+        # student's own available scores, ignoring missing ones
+        # rather than treating them as 0.
+        alice_average = alice_df.iloc[-1]
+        bob_average = bob_df.iloc[-1]
+
+        # Alice: only one of two photos is scored (80.0) -> average
+        # is 80.0, not 40.0 (which would mean the ungraded photo was
+        # silently counted as a 0).
+        assert alice_average["Total Score"] == 80.0
+        assert bob_average["Total Score"] == 95.0
+

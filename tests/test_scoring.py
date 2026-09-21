@@ -2,6 +2,7 @@ import pytest
 
 from app.core.rules import (
     Rule,
+    RuleEngineConfig,
     RuleError,
     build_rule,
     validate_rule,
@@ -305,3 +306,62 @@ class TestGradeStudent:
         share = 99 / 3
         expected_deduction = 0 + (share / 2) + share
         assert result.technical_score == pytest.approx(round(99 - expected_deduction, 1))
+
+
+# -----------------------------------------
+# RULE / RULE ENGINE CONFIG SERIALIZATION
+# (Rule.to_dict/from_dict, RuleEngineConfig.to_dict/from_dict --
+# used by storage.rule_presets and ClassRecord.rule_config)
+# -----------------------------------------
+
+def test_rule_engine_config_survives_a_to_dict_from_dict_round_trip():
+
+    original = RuleEngineConfig(
+        system_score=40,
+        human_score=60,
+        rules=[
+            Rule(factor="iso", minimum=100.0, maximum=400.0),
+            Rule(factor="aperture", minimum=2.0, maximum=8.0),
+            Rule(factor="focal_length", minimum=24.0, maximum=70.0),
+        ],
+    )
+
+    reconstructed = RuleEngineConfig.from_dict(original.to_dict())
+
+    # Score split survives.
+    assert reconstructed.system_score == original.system_score
+    assert reconstructed.human_score == original.human_score
+
+    # Every rule -- factor and its exact min/max range -- survives,
+    # in the same order.
+    assert len(reconstructed.rules) == len(original.rules)
+
+    for rebuilt_rule, original_rule in zip(reconstructed.rules, original.rules):
+        assert rebuilt_rule.factor == original_rule.factor
+        assert rebuilt_rule.minimum == original_rule.minimum
+        assert rebuilt_rule.maximum == original_rule.maximum
+
+    # The round trip actually goes through plain, JSON-safe data --
+    # not just returning the same objects back.
+    as_dict = original.to_dict()
+    assert as_dict == {
+        "system_score": 40,
+        "human_score": 60,
+        "rules": [
+            {"factor": "iso", "minimum": 100.0, "maximum": 400.0},
+            {"factor": "aperture", "minimum": 2.0, "maximum": 8.0},
+            {"factor": "focal_length", "minimum": 24.0, "maximum": 70.0},
+        ],
+    }
+
+    # The reconstructed config must be usable by the scoring code
+    # exactly like the original -- same grading result either way.
+    metadata = {"iso": 200, "fnum": 4.0, "focal": 500}  # focal is RED
+
+    original_result = grade_student(metadata, original.rules, original.system_score)
+    reconstructed_result = grade_student(metadata, reconstructed.rules, reconstructed.system_score)
+
+    assert reconstructed_result.technical_score == original_result.technical_score
+    assert [r.status for r in reconstructed_result.rule_results] == [
+        r.status for r in original_result.rule_results
+    ]
