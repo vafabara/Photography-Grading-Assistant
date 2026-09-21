@@ -21,6 +21,7 @@ No CustomTkinter dependency here (spec section 8) -- same rule as
 core/rules.py and core/scoring.py.
 """
 
+import math
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,20 @@ from .student import ImageRecord
 
 class ClassError(ValueError):
     """Raised when a Class or Student fails validation."""
+
+
+def _is_valid_score(value):
+    """
+    True for a real, usable score -- a number that isn't NaN.
+    None (not graded yet), NaN, and anything non-numeric are all
+    treated as "no score" so they can never distort an average.
+    """
+
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and not math.isnan(value)
+    )
 
 
 @dataclass
@@ -160,6 +175,45 @@ class ClassRecord:
     @property
     def pending_student_count(self):
         return self.student_count - self.completed_student_count
+
+    def _graded_total_scores(self):
+        """
+        Every valid photo-level Total Score in the whole class, in
+        one flat list (new feature: Class Average). Reads the same
+        `total_score` values as ClassStudentEntry.average_total_score
+        -- just pooled across students instead of averaged per
+        student.
+        """
+
+        return [
+            photo.total_score
+            for student in self.students
+            for photo in student.photos
+            if _is_valid_score(photo.total_score)
+        ]
+
+    @property
+    def graded_photo_count(self):
+        """Number of photos in the class that have a valid Total Score."""
+
+        return len(self._graded_total_scores())
+
+    @property
+    def average_total_score(self):
+        """
+        Class Average (new feature): the mean of every graded
+        photo's Total Score across the whole class -- deliberately
+        NOT the mean of the per-student averages, so a student with
+        10 photos counts for more than a student with 2. Returns
+        NaN if nothing has been graded yet, never 0.
+        """
+
+        scores = self._graded_total_scores()
+
+        if not scores:
+            return float("nan")
+
+        return round(sum(scores) / len(scores), 2)
 
     def to_dict(self):
         return {

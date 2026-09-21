@@ -1,8 +1,10 @@
 import math
+from tkinter import filedialog
 
 import customtkinter as ctk
 
-from .widgets import show_info
+from ..storage.export import default_export_filename, export_class_to_excel
+from .widgets import show_error, show_info
 
 
 class ClassResultsScreen:
@@ -18,16 +20,19 @@ class ClassResultsScreen:
                -> Student DataFrame -> Class Results (this screen)
 
     Takes a parent frame and a ClassRecord, and calls back into App
-    for its three bottom actions -- this screen never touches
-    storage itself (same rule as ClassScreen / StudentDetailScreen).
+    for navigation (Home / Review / a student's details) -- this
+    screen never touches class storage itself (same rule as
+    ClassScreen / StudentDetailScreen). Export is the one action it
+    handles directly: it asks where to save, then hands the
+    ClassRecord to storage.export, which builds the workbook.
     """
 
-    def __init__(self, parent, class_record, on_home, on_review, on_export=None):
+    def __init__(self, parent, class_record, on_home, on_review, on_student_details):
 
         self.class_record = class_record
         self.on_home = on_home
         self.on_review = on_review
-        self.on_export = on_export
+        self.on_student_details = on_student_details
 
         self.container = ctk.CTkFrame(
             parent,
@@ -42,6 +47,8 @@ class ClassResultsScreen:
         )
 
         self.create_header()
+        self.create_completion_message()
+        self.create_class_average_card()
         self.create_summary()
         self.create_student_table()
         self.create_bottom_bar()
@@ -64,6 +71,97 @@ class ClassResultsScreen:
             text=self.class_record.class_name,
             font=ctk.CTkFont(size=26, weight="bold")
         ).pack(pady=(0, 15))
+
+    # -----------------------------------------
+    # COMPLETION MESSAGE
+    # -----------------------------------------
+
+    def create_completion_message(self):
+        """
+        Short status line under the class name. The "grading
+        completed" wording is only shown when it's actually true
+        (every student Completed) -- this page is also reached after
+        grading a single student, when others may still be Pending.
+        """
+
+        if not self.class_record.students:
+            return
+
+        pending = self.class_record.pending_student_count
+
+        if pending == 0:
+            text = (
+                "Grading completed successfully. "
+                "All student results are ready to review."
+            )
+            color = "#7CFFB2"
+        else:
+            noun = "student" if pending == 1 else "students"
+            text = f"Grading in progress. {pending} {noun} still pending."
+            color = "gray60"
+
+        ctk.CTkLabel(
+            self.container,
+            text=text,
+            text_color=color,
+            font=ctk.CTkFont(size=13)
+        ).pack(pady=(0, 15))
+
+    # -----------------------------------------
+    # CLASS AVERAGE
+    # -----------------------------------------
+
+    def create_class_average_card(self):
+        """
+        Reads ClassRecord.average_total_score -- the mean of every
+        graded *photo's* Total Score in the class, not the mean of
+        the student averages -- so it's shown exactly as computed.
+        """
+
+        average = self.class_record.average_total_score
+        graded = self.class_record.graded_photo_count
+        total = self.class_record.total_photo_count
+
+        average_text = "—" if math.isnan(average) else f"{average:g} / 100"
+
+        # True when the average is built from only part of the class.
+        is_partial = 0 < graded < total
+
+        card = ctk.CTkFrame(
+            self.container,
+            corner_radius=12
+        )
+
+        card.pack(pady=(0, 15))
+
+        ctk.CTkLabel(
+            card,
+            text="Class Average",
+            text_color="gray60",
+            font=ctk.CTkFont(size=14)
+        ).pack(
+            padx=60,
+            pady=(12, 0)
+        )
+
+        ctk.CTkLabel(
+            card,
+            text=average_text,
+            text_color="#7CFFB2",
+            font=ctk.CTkFont(size=28, weight="bold")
+        ).pack(
+            padx=60,
+            pady=(0, 2 if is_partial else 12)
+        )
+
+        if is_partial:
+
+            ctk.CTkLabel(
+                card,
+                text=f"Based on {graded} of {total} photos graded",
+                text_color="gray60",
+                font=ctk.CTkFont(size=12)
+            ).pack(pady=(0, 12))
 
     # -----------------------------------------
     # CLASS SUMMARY
@@ -152,6 +250,12 @@ class ClassResultsScreen:
         the Class Screen, so nothing here is a second calculation.
         A Pending student always shows "—" for Average, even if a
         partial average could technically be computed.
+
+        The name cell also holds the small "ⓘ" details button, which
+        opens that student's per-photo details via
+        on_student_details(class_record, student_index). Rows start
+        at grid row 1 (row 0 is the header), so the student's index
+        in class_record.students is row_index - 1.
         """
 
         completed = student.is_completed
@@ -162,9 +266,44 @@ class ClassResultsScreen:
         else:
             average_text = "—"
 
-        row_values = [student.name, str(student.photo_count), average_text]
+        name_cell = ctk.CTkFrame(
+            table_frame,
+            fg_color="transparent"
+        )
 
-        for col_index, value in enumerate(row_values):
+        name_cell.grid(
+            row=row_index,
+            column=0,
+            padx=15,
+            pady=4,
+            sticky="w"
+        )
+
+        ctk.CTkLabel(
+            name_cell,
+            text=student.name,
+            anchor="w"
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            name_cell,
+            text="ⓘ",
+            width=28,
+            height=24,
+            fg_color="transparent",
+            hover_color="#123f2c",
+            text_color="#7CFFB2",
+            command=lambda i=row_index - 1: self.on_student_details(
+                self.class_record, i
+            )
+        ).pack(
+            side="left",
+            padx=(8, 0)
+        )
+
+        row_values = [str(student.photo_count), average_text]
+
+        for col_index, value in enumerate(row_values, start=1):
 
             ctk.CTkLabel(
                 table_frame,
@@ -189,7 +328,7 @@ class ClassResultsScreen:
             anchor="w"
         ).grid(
             row=row_index,
-            column=len(row_values),
+            column=3,
             padx=15,
             pady=4,
             sticky="w"
@@ -249,18 +388,54 @@ class ClassResultsScreen:
 
     def handle_export(self):
         """
-        Placeholder only (spec: Export is not implemented yet). Uses
-        the existing show_info dialog pattern rather than inventing
-        a new one, the same way show_error/show_confirm are already
-        reused across the app.
+        Ask where to save, then export the class to an .xlsx
+        workbook via storage.export.export_class_to_excel. Failures
+        are shown as plain messages -- never a traceback.
         """
 
-        if self.on_export:
-            self.on_export()
+        file_path = filedialog.asksaveasfilename(
+            title="Export Class Results",
+            defaultextension=".xlsx",
+            filetypes=[("Excel workbook", "*.xlsx")],
+            initialfile=default_export_filename(self.class_record.class_name)
+        )
+
+        if not file_path:
             return
 
-        show_info(
-            self.container,
-            "Export",
-            "Export is coming soon."
-        )
+        # defaultextension isn't applied on every platform.
+        if not file_path.lower().endswith(".xlsx"):
+            file_path += ".xlsx"
+
+        try:
+            export_class_to_excel(self.class_record, file_path)
+
+        except ImportError:
+            show_error(
+                self.container,
+                "Excel export needs the 'openpyxl' package.\n"
+                "Install it with: pip install openpyxl"
+            )
+
+        except OSError:
+            show_error(
+                self.container,
+                "Could not save the file. Make sure it isn't open in "
+                "another program and that you can write to that location."
+            )
+
+        except Exception:
+            # Last-resort guard at the GUI boundary (e.g. openpyxl
+            # rejecting an unusual character in a note): the teacher
+            # gets a message instead of a silent failure.
+            show_error(
+                self.container,
+                "Could not export the results."
+            )
+
+        else:
+            show_info(
+                self.container,
+                "Export",
+                "Results exported successfully."
+            )

@@ -29,6 +29,7 @@ from .metadata_panel import MetadataPanel
 from .results_screen import ClassResultsScreen
 from .rule_engine import RuleEngineScreen
 from .student_detail import StudentDetailScreen
+from .student_results_detail import StudentResultsDetailScreen
 from .student_setup import StudentFoldersScreen
 from .widgets import show_error
 
@@ -725,7 +726,26 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             self.main_frame,
             class_record=self.class_record,
             on_home=self.show_setup_count_screen,
-            on_review=self.start_review
+            on_review=self.start_review,
+            on_student_details=self.on_open_results_student
+        )
+
+    def on_open_results_student(self, class_record, student_index):
+        """
+        Called by ClassResultsScreen's "ⓘ" button (new feature:
+        Student Details). Shows that student's per-photo scores and
+        notes; Back to Results goes through show_results_screen, so
+        the Results page is rebuilt fresh from storage like always.
+        """
+
+        student = class_record.students[student_index]
+
+        self.clear_main_frame()
+
+        StudentResultsDetailScreen(
+            self.main_frame,
+            student=student,
+            on_back=self.show_results_screen
         )
 
     # -----------------------------------------

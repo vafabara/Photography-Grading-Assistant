@@ -24,6 +24,24 @@ PhotoGrade is a **Smart Photography Grading Assistant** for photography teachers
 * 📋 Copy image and metadata information
 * 📦 JSON / CSV export support
 
+## 📸 Screenshots
+
+### Home
+
+![PhotoGrade Home](assets/images/home_page.png)
+
+### Class Management
+
+![PhotoGrade Class Management](assets/images/class_manager.png)
+
+### Rule Engine
+
+![PhotoGrade Rule Engine](assets/images/rule_engine.png)
+
+### Grading
+
+![PhotoGrade Grading](assets/images/grading.png)
+
 ## 🧠 Python Concepts Used
 
 The project applies practical Python development concepts, including:
@@ -77,6 +95,9 @@ Photography-Grading-Assistant/
 │       ├── class_storage.py
 │       ├── export.py
 │       └── rule_presets.py
+│
+├── assets/
+│   └── images/
 │
 ├── classes/
 ├── tests/

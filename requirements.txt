@@ -3,3 +3,4 @@ Pillow
 piexif
 tkinterdnd2
 pandas
+openpyxl
