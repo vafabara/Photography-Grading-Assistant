@@ -11,7 +11,16 @@ import csv
 import json
 from pathlib import Path
 
-from app.storage.export import build_export_data, export_to_csv, export_to_json
+import pandas as pd
+
+from app.core.class_model import ClassPhotoEntry, ClassRecord, ClassStudentEntry
+from app.storage.export import (
+    build_export_data,
+    export_class_to_excel,
+    export_to_csv,
+    export_to_json,
+    make_sheet_name,
+)
 
 
 def make_image_data(**overrides):
@@ -171,3 +180,92 @@ class TestExportToCsv:
         export_to_csv(data, tmp_path / "export.csv")
 
         assert data == original
+
+
+# -----------------------------------------
+# EXCEL EXPORT (app.storage.export.export_class_to_excel /
+# make_sheet_name) -- new Class Results -> Export feature, currently
+# with no coverage at all.
+# -----------------------------------------
+
+class TestMakeSheetName:
+
+    def test_sanitizes_truncates_and_deduplicates_case_insensitively(self):
+
+        used = set()
+
+        # Invalid Excel sheet-name characters are stripped/replaced,
+        # and the result never exceeds Excel's 31-char limit.
+        long_name = make_sheet_name("Weird:Name/With*Bad?Chars[Here]" + "X" * 20, used)
+
+        assert len(long_name) <= 31
+        for char in ":\\/?*[]":
+            assert char not in long_name
+
+        # A case-insensitive clash (Excel treats "ali" and "Ali" as
+        # the same sheet) gets a numeric suffix rather than silently
+        # colliding with -- or overwriting -- the earlier sheet.
+        first = make_sheet_name("Ali", used)
+        second = make_sheet_name("ali", used)
+        third = make_sheet_name("ALI", used)
+
+        assert first == "Ali"
+        assert second.endswith("_2")
+        assert third.endswith("_3")
+        assert len({first.lower(), second.lower(), third.lower()}) == 3
+
+
+class TestExportClassToExcel:
+
+    def make_class_record(self):
+
+        return ClassRecord(
+            class_id="class-1",
+            class_name="Photography 101",
+            students=[
+                ClassStudentEntry(
+                    name="Alice",
+                    folder_path="/photos/alice",
+                    photo_count=1,
+                    photos=[
+                        ClassPhotoEntry(
+                            path="/photos/alice/1.jpg",
+                            rule_engine_score=35.0,
+                            teacher_score=50.0,
+                            total_score=85.0,
+                            note="Great composition",
+                        ),
+                    ],
+                ),
+                ClassStudentEntry(
+                    name="Bob",
+                    folder_path="/photos/bob",
+                    photo_count=1,
+                    photos=[ClassPhotoEntry(path="/photos/bob/1.jpg")],  # ungraded
+                ),
+            ],
+        )
+
+    def test_writes_a_class_results_sheet_and_one_sheet_per_student(self, tmp_path):
+
+        record = self.make_class_record()
+        output_path = tmp_path / "results.xlsx"
+
+        export_class_to_excel(record, output_path)
+
+        sheets = pd.read_excel(output_path, sheet_name=None)
+
+        assert set(sheets.keys()) == {"Class Results", "Alice", "Bob"}
+
+        # Class Results: one row per student plus a trailing Class
+        # Average row, reading the same completion/average logic the
+        # Class Screen and Results page already rely on.
+        class_results = sheets["Class Results"]
+        assert list(class_results["Student"]) == ["Alice", "Bob", "Class Average"]
+        assert list(class_results["Status"])[:2] == ["Completed", "Pending"]
+
+        # Alice's own sheet carries her photo's exact scores and note.
+        alice_sheet = sheets["Alice"]
+        alice_photo_row = alice_sheet.iloc[0]
+        assert alice_photo_row["Total Score"] == 85.0
+        assert alice_photo_row["Note"] == "Great composition"
