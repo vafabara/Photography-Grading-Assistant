@@ -21,11 +21,14 @@ GREEN = "green"
 YELLOW = "yellow"
 RED = "red"
 
-# Not in the original spec: a rule was defined for a factor, but this
-# particular photo has no value for it (e.g. missing EXIF data). The
-# spec doesn't cover this case, so as a design choice I'm treating it
-# as "can't verify" with no deduction (benefit of the doubt) rather
-# than an automatic RED. Flag me if you'd rather it counted as RED.
+# A rule was defined for a factor, but this particular photo has no
+# value for it (e.g. missing EXIF data). Per-rule this is still
+# "can't verify" with no deduction of its own — but if ANY rule the
+# professor configured comes back MISSING, the whole photo's Rule
+# Engine result is invalid: grade_student() below sets
+# GradingResult.exif_missing = True and technical_score = None
+# instead of computing a partial score, since a professor-configured
+# factor with no data can't be silently ignored or given a free pass.
 MISSING = "missing"
 
 
@@ -40,9 +43,14 @@ class RuleResult:
 
 @dataclass
 class GradingResult:
-    technical_score: float
+    technical_score: float | None
     system_score: float
     rule_results: list = field(default_factory=list)
+    # True if at least one configured Rule's factor was missing from
+    # this photo's EXIF data. When True, technical_score is None —
+    # the caller (gui/app.py) hands the photo's full 100 points to
+    # Teacher Grading instead of the usual System/Human split.
+    exif_missing: bool = False
 
 
 def split_score(system_score, rules):
@@ -94,17 +102,24 @@ def grade_student(raw_metadata, rules, system_score):
     `system_score` — points (out of 100) assigned to the system.
 
     Returns a GradingResult with the Technical Score and one
-    RuleResult per rule, ready for the GUI to render.
+    RuleResult per rule, ready for the GUI to render. If any
+    configured rule's factor is missing from `raw_metadata`,
+    technical_score is None and exif_missing is True instead of a
+    partial score — see the MISSING/exif_missing notes above.
     """
 
     scores = split_score(system_score, rules)
     rule_results = []
     total_deduction = 0.0
+    exif_missing = False
 
     for rule in rules:
 
         rule_score = scores[rule.factor]
         status, value = evaluate_rule(rule, raw_metadata)
+
+        if status == MISSING:
+            exif_missing = True
 
         if status in (GREEN, MISSING):
             deduction = 0.0
@@ -125,11 +140,19 @@ def grade_student(raw_metadata, rules, system_score):
             )
         )
 
-    # Rounded here since this is the final result stage (spec section 11)
-    technical_score = round(system_score - total_deduction, 1)
+    if exif_missing:
+        # At least one professor-configured factor has no data on
+        # this photo — the Rule Engine can't produce a valid partial
+        # score, so it produces none at all (spec 11 rounding does
+        # not apply here).
+        technical_score = None
+    else:
+        # Rounded here since this is the final result stage (spec section 11)
+        technical_score = round(system_score - total_deduction, 1)
 
     return GradingResult(
         technical_score=technical_score,
         system_score=system_score,
         rule_results=rule_results,
+        exif_missing=exif_missing,
     )

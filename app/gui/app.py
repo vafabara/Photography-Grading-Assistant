@@ -368,7 +368,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         Applies the professor's System/Human score split to every
         photo in the review queue. The split itself always comes
         from `config` -- nothing here hard-codes a specific
-        weighting -- so 40/60, 30/70, etc. all just work.
+        weighting -- so 40/60, 30/70, etc. all just work. This is
+        just the default; load_and_display() overrides it per photo
+        to teacher_max_score=100 if that photo's EXIF turns out to
+        be missing a configured factor, since that isn't known until
+        the photo is actually loaded and graded.
 
         Also persists `config` onto self.class_record (new feature:
         class's active Rule Engine configuration) so reopening this
@@ -987,6 +991,15 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         Teacher Grading has something to render. It isn't added to
         self.image_records, so it never affects the Next button or
         the official per-student results.
+
+        If Rule Engine grading comes back with grading.exif_missing
+        True -- at least one factor the professor configured is
+        missing from this photo's EXIF -- the Rule Engine score is
+        left as None (MetadataPanel/TeacherGradingPanel show
+        "EXIF Missing" for it) and this photo's teacher_max_score is
+        forced to the full 100 points instead of the configured
+        System/Human split, so the professor grades it entirely
+        manually.
         """
 
         try:
@@ -1013,12 +1026,20 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
             image_record.grading_result = grading
 
-            if grading is not None:
-                image_record.rule_engine_score = grading.technical_score
-                image_record.rule_engine_max_score = grading.system_score
+            if grading is not None and grading.exif_missing:
 
-            if self.rule_config is not None:
-                image_record.teacher_max_score = self.rule_config.human_score
+                image_record.rule_engine_score = None
+                image_record.rule_engine_max_score = grading.system_score
+                image_record.teacher_max_score = 100
+
+            else:
+
+                if grading is not None:
+                    image_record.rule_engine_score = grading.technical_score
+                    image_record.rule_engine_max_score = grading.system_score
+
+                if self.rule_config is not None:
+                    image_record.teacher_max_score = self.rule_config.human_score
 
             self.image_viewer.update(
                 self.current_image,

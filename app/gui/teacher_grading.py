@@ -18,7 +18,12 @@ class TeacherGradingPanel:
     set on the ImageRecord passed to update() (rule_engine_max_score
     / teacher_max_score, which app.py fills in from the existing
     RuleEngineConfig) -- nothing here is hard-coded to a specific
-    weighting, so 40/60 and 30/70 both just work.
+    weighting, so 40/60 and 30/70 both just work. The one exception
+    is a photo whose Rule Engine grading came back with
+    grading_result.exif_missing True -- app.py has already set that
+    photo's teacher_max_score to 100 instead of the configured
+    split, and this panel shows "EXIF Missing" in place of a Rule
+    Engine score.
 
     Calls `on_confirm(image_record)` once the professor enters a
     valid score and presses Confirm.
@@ -153,7 +158,14 @@ class TeacherGradingPanel:
         self.image_record = image_record
         self.error_label.configure(text="")
 
-        if image_record.rule_engine_score is None:
+        grading = image_record.grading_result
+        exif_missing = grading is not None and grading.exif_missing
+
+        if exif_missing:
+            self.rule_engine_label.configure(
+                text="Rule Engine: EXIF Missing"
+            )
+        elif image_record.rule_engine_score is None:
             self.rule_engine_label.configure(
                 text="Rule Engine: — (no rules configured)"
             )
